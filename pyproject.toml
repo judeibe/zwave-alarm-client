@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "zwave-alarm-client"
+version = "0.1.0"
+description = "Async REST client for the Z-Wave Alarm service"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "ISC"
+authors = [{ name = "Toochukwu Ibe" }]
+dependencies = ["aiohttp>=3.9"]
+
+[project.optional-dependencies]
+# aioresponses 0.7.9 breaks on aiohttp>=3.10 (new required ClientResponse stream_writer kwarg), so tests pin below it.
+test = ["pytest", "pytest-asyncio", "aioresponses", "aiohttp<3.10"]
+
+[project.urls]
+Homepage = "https://github.com/judeibe/zwave-alarm-client"
+Issues = "https://github.com/judeibe/zwave-alarm-client/issues"
+Service = "https://github.com/judeibe/zwave_alarm"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/zwave_alarm_client"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

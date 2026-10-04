@@ -7,16 +7,11 @@ machinery, since `config_flow.py`'s only real logic is delegated here.
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import aiohttp
 import pytest
 from aioresponses import aioresponses
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "custom_components" / "zwave_alarm"))
-
-from api import (  # noqa: E402
+from zwave_alarm_client import (
     AccountLocked,
     CannotConnect,
     CommandRejected,
