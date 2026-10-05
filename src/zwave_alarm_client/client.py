@@ -28,6 +28,7 @@ from .errors import (
     NotFound,
     ServiceUnavailable,
     TooManyRequests,
+    ZoneInUse,
     ZoneNotEmpty,
 )
 from .models import (
@@ -105,6 +106,8 @@ async def _request(
                 if status == 409:
                     if code == "zone_not_empty":
                         raise ZoneNotEmpty(message)
+                    if code == "zone_in_use":
+                        raise ZoneInUse(message)
                     if code == "code_in_use":
                         raise CodeInUse(message)
                     raise conflict(message)
@@ -264,8 +267,8 @@ async def async_delete_zone(
 ) -> None:
     """`DELETE /zones/{zoneId}` (administrator only).
 
-    `409 zone_not_empty` -> `ZoneNotEmpty` if the zone has sensors or is a guest's zone, unless `force=True`,
-    which unassigns the sensors (it is still rejected while a guest references the zone).
+    `409 zone_not_empty` -> `ZoneNotEmpty` if the zone has sensors, unless `force=True`, which unassigns them.
+    `409 zone_in_use` -> `ZoneInUse` while a guest's `guest_zone_id` references the zone, even with `force=True`.
     """
     params = {"force": "true"} if force else None
     await _request(session, "DELETE", host, port, token, f"/zones/{zone_id}", secure=secure, params=params)
@@ -325,7 +328,7 @@ async def async_create_user(
     token: str | None,
     name: str,
     role: Role,
-    code: str,
+    code: str | None = None,
     *,
     guest_expires_at: str | int | None = None,
     guest_zone_id: str | None = None,
@@ -335,12 +338,17 @@ async def async_create_user(
 ) -> User:
     """`POST /users` (administrator only, except the first-run bootstrap of the first administrator).
 
-    `ha_person_id` / `ha_user_id` link the user to a Home Assistant person / user (display and linking only).
+    `code` may be omitted: the user then exists with `hasCode=false` and gets a code later via
+    `async_set_user_code`. The first-run bootstrap administrator must still send one.
+    `ha_person_id` / `ha_user_id` link the user to a Home Assistant person / user (display and linking only);
+    a `ha_person_id` already linked to another user is a `409` -> `Conflict`.
 
     A guest needs `guest_expires_at` (ISO date string or epoch ms) and/or
     `guest_zone_id`; a zone-restricted guest disarms only that zone (FR-010a).
     """
-    body: dict[str, Any] = {"name": name, "role": role, "code": code}
+    body: dict[str, Any] = {"name": name, "role": role}
+    if code is not None:
+        body["code"] = code
     if guest_expires_at is not None:
         body["guestExpiresAt"] = guest_expires_at
     if guest_zone_id is not None:

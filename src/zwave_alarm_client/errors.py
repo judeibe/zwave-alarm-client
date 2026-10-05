@@ -36,7 +36,11 @@ class Conflict(ZwaveAlarmError):
 
 
 class ZoneNotEmpty(Conflict):
-    """The zone still has sensors or is a guest's `guestZoneId` (409 `zone_not_empty`); retry with `force=True` to unassign its sensors."""
+    """The zone still has sensors (409 `zone_not_empty`); retry with `force=True` to unassign them."""
+
+
+class ZoneInUse(Conflict):
+    """A guest's `guestZoneId` still references the zone (409 `zone_in_use`); `force=True` does not override it."""
 
 
 class CodeInUse(Conflict):

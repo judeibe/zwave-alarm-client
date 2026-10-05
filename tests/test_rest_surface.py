@@ -273,19 +273,23 @@ async def test_update_and_delete_zone() -> None:
 async def test_zone_not_empty_and_code_in_use_are_typed_conflicts() -> None:
     not_empty = {"error": {"code": "zone_not_empty", "message": "zone has sensors"}}
     in_use = {"error": {"code": "code_in_use", "message": "code already used"}}
+    in_zone = {"error": {"code": "zone_in_use", "message": "guest uses zone"}}
     other = {"error": {"code": "last_administrator", "message": "last admin"}}
     with aioresponses() as mocked:
         mocked.delete(f"{BASE}/zones/z1", status=409, payload=not_empty)
+        mocked.delete(f"{BASE}/zones/z2?force=true", status=409, payload=in_zone)
         mocked.put(f"{BASE}/users/u1/code", status=409, payload=in_use)
         mocked.delete(f"{BASE}/users/u1/code", status=409, payload=other)
         with pytest.raises(api.ZoneNotEmpty, match="zone has sensors"):
             await _call(api.async_delete_zone, TOKEN, "z1")
+        with pytest.raises(api.ZoneInUse):
+            await _call(api.async_delete_zone, TOKEN, "z2", force=True)
         with pytest.raises(api.CodeInUse):
             await _call(api.async_set_user_code, TOKEN, "u1", "1234")
         with pytest.raises(api.Conflict) as info:
             await _call(api.async_clear_user_code, TOKEN, "u1")
     assert type(info.value) is api.Conflict
-    assert issubclass(api.ZoneNotEmpty, api.Conflict) and issubclass(api.CodeInUse, api.Conflict)
+    assert all(issubclass(e, api.Conflict) for e in (api.ZoneNotEmpty, api.ZoneInUse, api.CodeInUse))
 
 
 async def test_discoverable_sensors_and_sensor_update_unassign() -> None:
@@ -332,3 +336,14 @@ async def test_user_ha_links_filter_update_and_code() -> None:
     }
     assert patch.kwargs["json"] == {"role": "administrator", "haUserId": None}
     assert put.kwargs["json"] == {"code": "5678"}
+
+
+async def test_create_user_without_code_omits_the_key() -> None:
+    from yarl import URL
+
+    with aioresponses() as mocked:
+        mocked.post(f"{BASE}/users", status=201, payload={"id": "u1", "hasCode": False})
+        user = await _call(api.async_create_user, TOKEN, "Alex", "member", ha_person_id="person.alex")
+        (call,) = mocked.requests[("POST", URL(f"{BASE}/users"))]
+    assert user["hasCode"] is False
+    assert call.kwargs["json"] == {"name": "Alex", "role": "member", "haPersonId": "person.alex"}

@@ -41,6 +41,7 @@ from .errors import (
     NotFound,
     ServiceUnavailable,
     TooManyRequests,
+    ZoneInUse,
     ZoneNotEmpty,
     ZwaveAlarmError,
 )
@@ -73,6 +74,7 @@ __all__ = [
     "ServiceUnavailable",
     "TooManyRequests",
     "UserUpdate",
+    "ZoneInUse",
     "ZoneNotEmpty",
     "ZoneUpdate",
     "ZwaveAlarmError",
