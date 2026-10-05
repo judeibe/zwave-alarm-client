@@ -177,3 +177,76 @@ async def test_disarm_zone_restricted_guest_panel_is_returned_verbatim() -> None
     with aioresponses() as mocked:
         mocked.post(f"{BASE}/panel/disarm", payload=panel)
         assert await _call(api.async_disarm, TOKEN, "2222") == panel
+
+
+KEYPAD = {
+    "nodeId": 12,
+    "adapterId": "ring-keypad-v2",
+    "label": "Ring Keypad v2",
+    "capabilities": ["arm_disarm", "emergency", "indicators", "chime", "future_thing"],
+    "chimeSounds": ["double_beep", "doorbell"],
+    "connectivityStatus": "online",
+    "batteryLevel": None,
+    "somethingNew": 1,
+}
+
+
+async def test_list_keypads_unwraps_and_keeps_unknown_fields() -> None:
+    with aioresponses() as mocked:
+        mocked.get(f"{BASE}/keypads", payload={"keypads": [KEYPAD]})
+        keypads = await _call(api.async_list_keypads, TOKEN)
+    assert keypads == [KEYPAD]
+
+
+async def test_list_keypads_empty() -> None:
+    with aioresponses() as mocked:
+        mocked.get(f"{BASE}/keypads", payload={"keypads": []})
+        assert await _call(api.async_list_keypads, TOKEN) == []
+
+
+async def test_chime_keypad_posts_sound_and_volume() -> None:
+    with aioresponses() as mocked:
+        mocked.post(f"{BASE}/keypads/12/chime", status=204)
+        assert await _call(api.async_chime_keypad, TOKEN, 12, "doorbell", volume=60) is None
+        request = next(iter(mocked.requests.values()))[0]
+    assert request.kwargs["json"] == {"sound": "doorbell", "volume": 60}
+    assert request.kwargs["headers"] == {"Authorization": "Bearer tok"}
+
+
+async def test_chime_keypad_omits_volume_by_default() -> None:
+    with aioresponses() as mocked:
+        mocked.post(f"{BASE}/keypads/12/chime", status=204)
+        await _call(api.async_chime_keypad, TOKEN, 12, "guitar")
+        request = next(iter(mocked.requests.values()))[0]
+    assert request.kwargs["json"] == {"sound": "guitar"}
+
+
+async def test_chime_keypad_volume_zero_is_sent() -> None:
+    with aioresponses() as mocked:
+        mocked.post(f"{BASE}/keypads/12/chime", status=204)
+        await _call(api.async_chime_keypad, TOKEN, 12, "guitar", volume=0)
+        request = next(iter(mocked.requests.values()))[0]
+    assert request.kwargs["json"] == {"sound": "guitar", "volume": 0}
+
+
+async def test_chime_keypad_unknown_node_is_not_found() -> None:
+    body = {"error": {"code": "not_found", "message": "no such keypad"}}
+    with aioresponses() as mocked:
+        mocked.post(f"{BASE}/keypads/99/chime", status=404, payload=body)
+        with pytest.raises(api.NotFound, match="no such keypad"):
+            await _call(api.async_chime_keypad, TOKEN, 99, "doorbell")
+
+
+async def test_chime_keypad_bad_request() -> None:
+    body = {"error": {"code": "bad_request", "message": "unknown sound"}}
+    with aioresponses() as mocked:
+        mocked.post(f"{BASE}/keypads/12/chime", status=400, payload=body)
+        with pytest.raises(api.BadRequest, match="unknown sound"):
+            await _call(api.async_chime_keypad, TOKEN, 12, "kazoo", volume=100)
+
+
+async def test_list_keypads_status_mapping() -> None:
+    with aioresponses() as mocked:
+        mocked.get(f"{BASE}/keypads", status=401)
+        with pytest.raises(api.InvalidAuth):
+            await _call(api.async_list_keypads, TOKEN)

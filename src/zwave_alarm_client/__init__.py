@@ -3,6 +3,7 @@
 from .client import (
     async_arm,
     async_assign_sensor,
+    async_chime_keypad,
     async_create_ha_link,
     async_create_user,
     async_create_zone,
@@ -13,6 +14,7 @@ from .client import (
     async_get_lockout_policy,
     async_get_panel_state,
     async_get_zones,
+    async_list_keypads,
     async_list_users,
     async_login,
     async_logout,
@@ -32,6 +34,7 @@ from .errors import (
     TooManyRequests,
     ZwaveAlarmError,
 )
+from .models import KeypadEvent, KeypadInput, KeypadSummary
 from .stream import async_stream_events
 
 __all__ = [
@@ -42,12 +45,16 @@ __all__ = [
     "Conflict",
     "Forbidden",
     "InvalidAuth",
+    "KeypadEvent",
+    "KeypadInput",
+    "KeypadSummary",
     "NotFound",
     "ServiceUnavailable",
     "TooManyRequests",
     "ZwaveAlarmError",
     "async_arm",
     "async_assign_sensor",
+    "async_chime_keypad",
     "async_create_ha_link",
     "async_create_user",
     "async_create_zone",
@@ -58,6 +65,7 @@ __all__ = [
     "async_get_lockout_policy",
     "async_get_panel_state",
     "async_get_zones",
+    "async_list_keypads",
     "async_list_users",
     "async_login",
     "async_logout",

@@ -31,6 +31,7 @@ from .errors import (
 from .models import (
     ArmMode,
     HaLink,
+    KeypadSummary,
     LockoutPolicy,
     LockoutPolicyUpdate,
     Panel,
@@ -326,3 +327,39 @@ async def async_delete_ha_link(
 ) -> None:
     """`DELETE /ha-links/{linkId}` (administrator only): revoke a token."""
     await _request(session, "DELETE", host, port, token, f"/ha-links/{link_id}", secure=secure)
+
+
+# --- Keypads ----------------------------------------------------------------
+
+
+async def async_list_keypads(
+    session: aiohttp.ClientSession, host: str, port: int, token: str | None, *, secure: bool = False
+) -> list[KeypadSummary]:
+    """`GET /keypads`: every keypad the service has discovered (keypad contract v1.1).
+
+    The service wraps the list as `{ "keypads": [...] }`; this returns the list itself.
+    """
+    body = await _request(session, "GET", host, port, token, "/keypads", secure=secure)
+    return body["keypads"]
+
+
+async def async_chime_keypad(
+    session: aiohttp.ClientSession,
+    host: str,
+    port: int,
+    token: str | None,
+    node_id: int,
+    sound: str,
+    *,
+    volume: int | None = None,
+    secure: bool = False,
+) -> None:
+    """`POST /keypads/{nodeId}/chime`: play `sound` (one of the keypad's `chimeSounds`) at `volume` 0-99.
+
+    `404` (unknown node) -> `NotFound`; `400` (malformed body, bad volume, a sound the keypad lacks, or a
+    keypad without the `chime` capability) -> `BadRequest`.
+    """
+    body: dict[str, Any] = {"sound": sound}
+    if volume is not None:
+        body["volume"] = volume
+    await _request(session, "POST", host, port, token, f"/keypads/{node_id}/chime", secure=secure, json=body)
