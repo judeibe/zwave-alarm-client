@@ -250,3 +250,100 @@ async def test_list_keypads_status_mapping() -> None:
         mocked.get(f"{BASE}/keypads", status=401)
         with pytest.raises(api.InvalidAuth):
             await _call(api.async_list_keypads, TOKEN)
+
+
+# --- Config-panel endpoints (contracts/config-panel-api.md) ------------------
+
+
+async def test_update_and_delete_zone() -> None:
+    from yarl import URL
+
+    with aioresponses() as mocked:
+        mocked.patch(f"{BASE}/zones/z1", payload={"id": "z1", "name": "Hall", "sensors": []})
+        mocked.delete(f"{BASE}/zones/z1", status=204)
+        mocked.delete(f"{BASE}/zones/z1?force=true", status=204)
+        zone = await _call(api.async_update_zone, TOKEN, "z1", {"name": "Hall", "description": None})
+        assert await _call(api.async_delete_zone, TOKEN, "z1") is None
+        assert await _call(api.async_delete_zone, TOKEN, "z1", force=True) is None
+        (patch_call,) = mocked.requests[("PATCH", URL(f"{BASE}/zones/z1"))]
+    assert zone["name"] == "Hall"
+    assert patch_call.kwargs["json"] == {"name": "Hall", "description": None}
+
+
+async def test_zone_not_empty_and_code_in_use_are_typed_conflicts() -> None:
+    not_empty = {"error": {"code": "zone_not_empty", "message": "zone has sensors"}}
+    in_use = {"error": {"code": "code_in_use", "message": "code already used"}}
+    in_zone = {"error": {"code": "zone_in_use", "message": "guest uses zone"}}
+    other = {"error": {"code": "last_administrator", "message": "last admin"}}
+    with aioresponses() as mocked:
+        mocked.delete(f"{BASE}/zones/z1", status=409, payload=not_empty)
+        mocked.delete(f"{BASE}/zones/z2?force=true", status=409, payload=in_zone)
+        mocked.put(f"{BASE}/users/u1/code", status=409, payload=in_use)
+        mocked.delete(f"{BASE}/users/u1/code", status=409, payload=other)
+        with pytest.raises(api.ZoneNotEmpty, match="zone has sensors"):
+            await _call(api.async_delete_zone, TOKEN, "z1")
+        with pytest.raises(api.ZoneInUse):
+            await _call(api.async_delete_zone, TOKEN, "z2", force=True)
+        with pytest.raises(api.CodeInUse):
+            await _call(api.async_set_user_code, TOKEN, "u1", "1234")
+        with pytest.raises(api.Conflict) as info:
+            await _call(api.async_clear_user_code, TOKEN, "u1")
+    assert type(info.value) is api.Conflict
+    assert all(issubclass(e, api.Conflict) for e in (api.ZoneNotEmpty, api.ZoneInUse, api.CodeInUse))
+
+
+async def test_discoverable_sensors_and_sensor_update_unassign() -> None:
+    from yarl import URL
+
+    node = {"zwaveNodeId": 9, "name": None, "manufacturer": "Aeotec", "product": "Door", "suggestedCategory": "intrusion", "status": "alive"}
+    with aioresponses() as mocked:
+        mocked.get(f"{BASE}/sensors/discoverable", payload=[node])
+        mocked.patch(f"{BASE}/sensors/s1", payload={"id": "s1"})
+        mocked.delete(f"{BASE}/sensors/s1", status=204)
+        assert await _call(api.async_list_discoverable_sensors, TOKEN) == [node]
+        await _call(api.async_update_sensor, TOKEN, "s1", {"zoneId": "z2", "name": "Back door"})
+        assert await _call(api.async_unassign_sensor, TOKEN, "s1") is None
+        (call,) = mocked.requests[("PATCH", URL(f"{BASE}/sensors/s1"))]
+    assert call.kwargs["json"] == {"zoneId": "z2", "name": "Back door"}
+
+
+async def test_user_ha_links_filter_update_and_code() -> None:
+    from yarl import URL
+
+    with aioresponses() as mocked:
+        mocked.post(f"{BASE}/users", status=201, payload={"id": "u1"})
+        mocked.get(f"{BASE}/users?haPersonId=person.alex", payload=[{"id": "u1", "hasCode": True}])
+        mocked.patch(f"{BASE}/users/u1", payload={"id": "u1"})
+        mocked.put(f"{BASE}/users/u1/code", status=204)
+        mocked.delete(f"{BASE}/users/u1/code", status=204)
+        await _call(
+            api.async_create_user, TOKEN, "Alex", "member", "1234", ha_person_id="person.alex", ha_user_id="abc"
+        )
+        users = await _call(api.async_list_users, TOKEN, ha_person_id="person.alex")
+        await _call(api.async_update_user, TOKEN, "u1", {"role": "administrator", "haUserId": None})
+        assert await _call(api.async_set_user_code, TOKEN, "u1", "5678") is None
+        assert await _call(api.async_clear_user_code, TOKEN, "u1") is None
+        (create,) = mocked.requests[("POST", URL(f"{BASE}/users"))]
+        (patch,) = mocked.requests[("PATCH", URL(f"{BASE}/users/u1"))]
+        (put,) = mocked.requests[("PUT", URL(f"{BASE}/users/u1/code"))]
+    assert users == [{"id": "u1", "hasCode": True}]
+    assert create.kwargs["json"] == {
+        "name": "Alex",
+        "role": "member",
+        "code": "1234",
+        "haPersonId": "person.alex",
+        "haUserId": "abc",
+    }
+    assert patch.kwargs["json"] == {"role": "administrator", "haUserId": None}
+    assert put.kwargs["json"] == {"code": "5678"}
+
+
+async def test_create_user_without_code_omits_the_key() -> None:
+    from yarl import URL
+
+    with aioresponses() as mocked:
+        mocked.post(f"{BASE}/users", status=201, payload={"id": "u1", "hasCode": False})
+        user = await _call(api.async_create_user, TOKEN, "Alex", "member", ha_person_id="person.alex")
+        (call,) = mocked.requests[("POST", URL(f"{BASE}/users"))]
+    assert user["hasCode"] is False
+    assert call.kwargs["json"] == {"name": "Alex", "role": "member", "haPersonId": "person.alex"}

@@ -33,7 +33,30 @@ class Sensor(TypedDict):
 class Zone(TypedDict):
     id: str
     name: str
+    description: NotRequired[str | None]  # config-panel contract; absent on older services
     sensors: list[Sensor]
+
+
+class ZoneUpdate(TypedDict, total=False):
+    name: str
+    description: str | None
+
+
+class SensorUpdate(TypedDict, total=False):
+    name: str
+    category: SensorCategory
+    zoneId: str
+
+
+class DiscoverableSensor(TypedDict):
+    """An unassigned zwave-js node from `GET /sensors/discoverable`."""
+
+    zwaveNodeId: int
+    name: str | None
+    manufacturer: str | None
+    product: str | None
+    suggestedCategory: SensorCategory | None
+    status: Literal["alive", "dead", "asleep"]
 
 
 class User(TypedDict):
@@ -45,6 +68,19 @@ class User(TypedDict):
     failedAttemptCount: int
     lockedUntil: int | None
     createdAt: int
+    # Config-panel contract fields; absent on older services. A code is never returned, only whether one is set.
+    hasCode: NotRequired[bool]
+    haPersonId: NotRequired[str | None]
+    haUserId: NotRequired[str | None]
+
+
+class UserUpdate(TypedDict, total=False):
+    name: str
+    role: Role
+    haPersonId: str | None
+    haUserId: str | None
+    guestExpiresAt: str | int | None
+    guestZoneId: str | None
 
 
 class LockoutPolicy(TypedDict):

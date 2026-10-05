@@ -20,6 +20,7 @@ from .errors import (
     AccountLocked,
     BadRequest,
     CannotConnect,
+    CodeInUse,
     CommandRejected,
     Conflict,
     Forbidden,
@@ -27,9 +28,12 @@ from .errors import (
     NotFound,
     ServiceUnavailable,
     TooManyRequests,
+    ZoneInUse,
+    ZoneNotEmpty,
 )
 from .models import (
     ArmMode,
+    DiscoverableSensor,
     HaLink,
     KeypadSummary,
     LockoutPolicy,
@@ -38,8 +42,11 @@ from .models import (
     Role,
     SecurityEvent,
     SensorCategory,
+    SensorUpdate,
     User,
+    UserUpdate,
     Zone,
+    ZoneUpdate,
 )
 
 REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=10)
@@ -55,13 +62,13 @@ def auth_headers(token: str | None) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"} if token else {}
 
 
-async def _error_message(response: aiohttp.ClientResponse) -> str:
-    """The `error.message` of the service's `{ "error": { code, message } }` body, or `""` if absent."""
+async def _error_body(response: aiohttp.ClientResponse) -> tuple[str, str]:
+    """`(code, message)` of the service's `{ "error": { code, message } }` body; `""` for either if absent."""
     try:
-        body = await response.json(content_type=None)
-        return str(body["error"]["message"])
-    except (aiohttp.ClientError, ValueError, KeyError, TypeError):
-        return ""
+        error = (await response.json(content_type=None))["error"]
+        return str(error.get("code", "")), str(error["message"])
+    except (aiohttp.ClientError, ValueError, KeyError, TypeError, AttributeError):
+        return "", ""
 
 
 async def _request(
@@ -87,7 +94,7 @@ async def _request(
         ) as response:
             status = response.status
             if status >= 400:
-                message = await _error_message(response)
+                code, message = await _error_body(response)
                 if status == 400:
                     raise BadRequest(message)
                 if status == 401:
@@ -97,6 +104,12 @@ async def _request(
                 if status == 404:
                     raise NotFound(message)
                 if status == 409:
+                    if code == "zone_not_empty":
+                        raise ZoneNotEmpty(message)
+                    if code == "zone_in_use":
+                        raise ZoneInUse(message)
+                    if code == "code_in_use":
+                        raise CodeInUse(message)
                     raise conflict(message)
                 if status == 423:
                     raise AccountLocked(message)
@@ -228,14 +241,84 @@ async def async_assign_sensor(
     )
 
 
+async def async_update_zone(
+    session: aiohttp.ClientSession,
+    host: str,
+    port: int,
+    token: str | None,
+    zone_id: str,
+    update: ZoneUpdate,
+    *,
+    secure: bool = False,
+) -> Zone:
+    """`PATCH /zones/{zoneId}` (administrator only) with any non-empty subset of `name`, `description`."""
+    return await _request(session, "PATCH", host, port, token, f"/zones/{zone_id}", secure=secure, json=dict(update))
+
+
+async def async_delete_zone(
+    session: aiohttp.ClientSession,
+    host: str,
+    port: int,
+    token: str | None,
+    zone_id: str,
+    *,
+    force: bool = False,
+    secure: bool = False,
+) -> None:
+    """`DELETE /zones/{zoneId}` (administrator only).
+
+    `409 zone_not_empty` -> `ZoneNotEmpty` if the zone has sensors, unless `force=True`, which unassigns them.
+    `409 zone_in_use` -> `ZoneInUse` while a guest's `guest_zone_id` references the zone, even with `force=True`.
+    """
+    params = {"force": "true"} if force else None
+    await _request(session, "DELETE", host, port, token, f"/zones/{zone_id}", secure=secure, params=params)
+
+
+async def async_list_discoverable_sensors(
+    session: aiohttp.ClientSession, host: str, port: int, token: str | None, *, secure: bool = False
+) -> list[DiscoverableSensor]:
+    """`GET /sensors/discoverable` (administrator only): zwave-js nodes not yet assigned to a zone."""
+    return await _request(session, "GET", host, port, token, "/sensors/discoverable", secure=secure)
+
+
+async def async_update_sensor(
+    session: aiohttp.ClientSession,
+    host: str,
+    port: int,
+    token: str | None,
+    sensor_id: str,
+    update: SensorUpdate,
+    *,
+    secure: bool = False,
+) -> dict[str, Any]:
+    """`PATCH /sensors/{sensorId}` (administrator only): rename, recategorise or move to another `zoneId`."""
+    return await _request(
+        session, "PATCH", host, port, token, f"/sensors/{sensor_id}", secure=secure, json=dict(update)
+    )
+
+
+async def async_unassign_sensor(
+    session: aiohttp.ClientSession, host: str, port: int, token: str | None, sensor_id: str, *, secure: bool = False
+) -> None:
+    """`DELETE /sensors/{sensorId}` (administrator only): unassign it; the zwave-js node itself is kept."""
+    await _request(session, "DELETE", host, port, token, f"/sensors/{sensor_id}", secure=secure)
+
+
 # --- Users ------------------------------------------------------------------
 
 
 async def async_list_users(
-    session: aiohttp.ClientSession, host: str, port: int, token: str | None, *, secure: bool = False
+    session: aiohttp.ClientSession,
+    host: str,
+    port: int,
+    token: str | None,
+    *,
+    ha_person_id: str | None = None,
+    secure: bool = False,
 ) -> list[User]:
-    """`GET /users` (administrator only)."""
-    return await _request(session, "GET", host, port, token, "/users", secure=secure)
+    """`GET /users` (administrator only); `ha_person_id` filters to the user linked to that HA person."""
+    params = {"haPersonId": ha_person_id} if ha_person_id is not None else None
+    return await _request(session, "GET", host, port, token, "/users", secure=secure, params=params)
 
 
 async def async_create_user(
@@ -245,22 +328,35 @@ async def async_create_user(
     token: str | None,
     name: str,
     role: Role,
-    code: str,
+    code: str | None = None,
     *,
     guest_expires_at: str | int | None = None,
     guest_zone_id: str | None = None,
+    ha_person_id: str | None = None,
+    ha_user_id: str | None = None,
     secure: bool = False,
 ) -> User:
     """`POST /users` (administrator only, except the first-run bootstrap of the first administrator).
 
+    `code` may be omitted: the user then exists with `hasCode=false` and gets a code later via
+    `async_set_user_code`. The first-run bootstrap administrator must still send one.
+    `ha_person_id` / `ha_user_id` link the user to a Home Assistant person / user (display and linking only);
+    a `ha_person_id` already linked to another user is a `409` -> `Conflict`.
+
     A guest needs `guest_expires_at` (ISO date string or epoch ms) and/or
     `guest_zone_id`; a zone-restricted guest disarms only that zone (FR-010a).
     """
-    body: dict[str, Any] = {"name": name, "role": role, "code": code}
+    body: dict[str, Any] = {"name": name, "role": role}
+    if code is not None:
+        body["code"] = code
     if guest_expires_at is not None:
         body["guestExpiresAt"] = guest_expires_at
     if guest_zone_id is not None:
         body["guestZoneId"] = guest_zone_id
+    if ha_person_id is not None:
+        body["haPersonId"] = ha_person_id
+    if ha_user_id is not None:
+        body["haUserId"] = ha_user_id
     return await _request(session, "POST", host, port, token, "/users", secure=secure, json=body)
 
 
@@ -269,6 +365,43 @@ async def async_delete_user(
 ) -> None:
     """`DELETE /users/{userId}` (administrator only)."""
     await _request(session, "DELETE", host, port, token, f"/users/{user_id}", secure=secure)
+
+
+async def async_update_user(
+    session: aiohttp.ClientSession,
+    host: str,
+    port: int,
+    token: str | None,
+    user_id: str,
+    update: UserUpdate,
+    *,
+    secure: bool = False,
+) -> User:
+    """`PATCH /users/{userId}` (administrator only) with any non-empty subset of the fields in `UserUpdate`.
+
+    `409` -> `Conflict` if it would demote the last administrator.
+    """
+    return await _request(session, "PATCH", host, port, token, f"/users/{user_id}", secure=secure, json=dict(update))
+
+
+async def async_set_user_code(
+    session: aiohttp.ClientSession, host: str, port: int, token: str | None, user_id: str, code: str, *, secure: bool = False
+) -> None:
+    """`PUT /users/{userId}/code` (administrator only): set or replace the code (4-12 digits, write-only).
+
+    Resets the user's failed attempts and lockout. `409 code_in_use` -> `CodeInUse`.
+    """
+    await _request(session, "PUT", host, port, token, f"/users/{user_id}/code", secure=secure, json={"code": code})
+
+
+async def async_clear_user_code(
+    session: aiohttp.ClientSession, host: str, port: int, token: str | None, user_id: str, *, secure: bool = False
+) -> None:
+    """`DELETE /users/{userId}/code` (administrator only): the user can no longer disarm or log in.
+
+    `409` -> `Conflict` for the last administrator.
+    """
+    await _request(session, "DELETE", host, port, token, f"/users/{user_id}/code", secure=secure)
 
 
 # --- Lockout policy ---------------------------------------------------------
