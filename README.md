@@ -26,6 +26,7 @@ Every call takes `(session, host, port, token, ...)`; pass `token=None` to use a
 | Lockout policy | `async_get_lockout_policy`, `async_update_lockout_policy` |
 | Events | `async_get_events` |
 | HA links | `async_create_ha_link`, `async_delete_ha_link` |
+| Keypads | `async_list_keypads`, `async_chime_keypad` |
 | Push channel | `async_stream_events` (sends keepalive pings, drops `pong`s; reconnect policy is the caller's) |
 
 Response shapes are available as `TypedDict`s in `zwave_alarm_client.models`.

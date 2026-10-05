@@ -106,3 +106,48 @@ async def test_unreachable_host_is_cannot_connect() -> None:
         with pytest.raises(api.CannotConnect):
             async for _ in api.async_stream_events(session, "127.0.0.1", 1, "tok"):
                 pass
+
+
+async def test_keypad_messages_pass_through_including_unknown_kinds_and_fields() -> None:
+    keypad = {"nodeId": 12, "adapterId": "ring-keypad-v2", "label": "K", "capabilities": ["future"], "chimeSounds": [],
+              "connectivityStatus": "online", "batteryLevel": None, "extra": True}
+    messages = [
+        {**SNAPSHOT, "keypads": [keypad]},
+        {"type": "keypad.changed", "keypad": keypad},
+        {"type": "keypad.event", "nodeId": 12, "adapterId": "ring-keypad-v2", "input": {"kind": "emergency", "emergency": "fire"}},
+        {"type": "keypad.event", "nodeId": 12, "adapterId": "ring-keypad-v2", "input": {"kind": "from_the_future"}},
+    ]
+
+    async def handler(request: web.Request) -> web.WebSocketResponse:
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        for message in messages:
+            await ws.send_json(message)
+        await ws.close()
+        return ws
+
+    server = await _serve(handler)
+    try:
+        events = await _collect(server)
+    finally:
+        await server.close()
+
+    assert events == messages
+
+
+async def test_snapshot_without_keypads_is_still_delivered() -> None:
+    async def handler(request: web.Request) -> web.WebSocketResponse:
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        await ws.send_json(SNAPSHOT)
+        await ws.close()
+        return ws
+
+    server = await _serve(handler)
+    try:
+        events = await _collect(server)
+    finally:
+        await server.close()
+
+    assert events == [SNAPSHOT]
+    assert "keypads" not in events[0]
