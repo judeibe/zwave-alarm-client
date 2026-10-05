@@ -35,6 +35,14 @@ class Conflict(ZwaveAlarmError):
     """The request conflicts with current state (409), e.g. a sensor node already assigned to a zone."""
 
 
+class ZoneNotEmpty(Conflict):
+    """The zone still has sensors or is a guest's `guestZoneId` (409 `zone_not_empty`); retry with `force=True` to unassign its sensors."""
+
+
+class CodeInUse(Conflict):
+    """Another user already has this code (409 `code_in_use`); codes must be unique because login identifies by code."""
+
+
 class CommandRejected(Conflict):
     """A conflicting concurrent arm/disarm won the race (409, FR-014)."""
 
