@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "zwave-alarm-client"
-version = "0.4.0"
+version = "0.4.1"
 description = "Async REST client for the Z-Wave Alarm service"
 readme = "README.md"
 requires-python = ">=3.12"
