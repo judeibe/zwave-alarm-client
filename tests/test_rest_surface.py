@@ -347,3 +347,32 @@ async def test_create_user_without_code_omits_the_key() -> None:
         (call,) = mocked.requests[("POST", URL(f"{BASE}/users"))]
     assert user["hasCode"] is False
     assert call.kwargs["json"] == {"name": "Alex", "role": "member", "haPersonId": "person.alex"}
+
+
+async def test_service_unavailable_keeps_message_and_code() -> None:
+    body = {"error": {"code": "unavailable", "message": "The zwave-js driver is not ready yet; try again shortly."}}
+    with aioresponses() as mocked:
+        mocked.get(f"{BASE}/panel", status=503, payload=body)
+        with pytest.raises(api.ServiceUnavailable) as info:
+            await _call(api.async_get_panel_state, TOKEN)
+    assert str(info.value) == "The zwave-js driver is not ready yet; try again shortly."
+    assert info.value.code == "unavailable"
+    assert isinstance(info.value, api.CannotConnect)
+
+
+async def test_service_unavailable_without_body_has_empty_code() -> None:
+    with aioresponses() as mocked:
+        mocked.get(f"{BASE}/panel", status=503)
+        with pytest.raises(api.ServiceUnavailable) as info:
+            await _call(api.async_get_panel_state, TOKEN)
+    assert info.value.code == ""
+
+
+async def test_no_token_sends_no_authorization_header() -> None:
+    from yarl import URL
+
+    with aioresponses() as mocked:
+        mocked.get(f"{BASE}/panel", payload={"state": "disarmed"})
+        await _call(api.async_get_panel_state, None)
+        (call,) = mocked.requests[("GET", URL(f"{BASE}/panel"))]
+    assert "Authorization" not in (call.kwargs.get("headers") or {})

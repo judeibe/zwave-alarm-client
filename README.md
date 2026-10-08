@@ -7,13 +7,13 @@ import aiohttp
 from zwave_alarm_client import async_get_panel_state, async_stream_events, InvalidAuth, CannotConnect
 
 async with aiohttp.ClientSession() as session:
-    panel = await async_get_panel_state(session, "192.168.1.50", 3000, token)
+    panel = await async_get_panel_state(session, "192.168.1.50", 3000, None)
 
-    async for event in async_stream_events(session, "192.168.1.50", 3000, token):
+    async for event in async_stream_events(session, "192.168.1.50", 3000, None):
         ...  # first event is a full `snapshot`, then `panel.changed`, `sensor.changed`, ...
 ```
 
-Every call takes `(session, host, port, token, ...)`; pass `token=None` to use a cookie session from `async_login` instead, and `secure=True` for https/wss.
+Every call takes `(session, host, port, token, ...)`; `token` is optional: pass `None` (no `Authorization` header is sent, so only host and port are needed); a non-empty value is sent as a bearer token. A cookie session from `async_login` also works with `None`. Pass `secure=True` for https/wss.
 
 ## Coverage
 
