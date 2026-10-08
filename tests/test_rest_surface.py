@@ -367,3 +367,12 @@ async def test_service_unavailable_without_body_has_empty_code() -> None:
             await _call(api.async_get_panel_state, TOKEN)
     assert info.value.code == ""
 
+
+async def test_no_token_sends_no_authorization_header() -> None:
+    from yarl import URL
+
+    with aioresponses() as mocked:
+        mocked.get(f"{BASE}/panel", payload={"state": "disarmed"})
+        await _call(api.async_get_panel_state, None)
+        (call,) = mocked.requests[("GET", URL(f"{BASE}/panel"))]
+    assert "Authorization" not in (call.kwargs.get("headers") or {})

@@ -1,10 +1,12 @@
 """REST client for the Z-Wave Alarm service (contracts/rest-api.md).
 
-Every call takes `(session, host, port, token, ...)`. `token` is the bearer
-token issued via `POST /api/v1/ha-links`; pass `None` to authenticate with the
-session cookie instead (see `async_login`, which needs a `ClientSession` that
-keeps cookies). `secure=True` switches to `https://` for deployments behind a
-TLS-terminating proxy.
+Every call takes `(session, host, port, token, ...)`. Authentication is
+optional: pass `token=None` (the default posture) and no `Authorization`
+header is sent, so the client needs only host and port. A non-empty `token` is
+still sent as a bearer token for deployments that enforce one. A cookie session
+(see `async_login`, which needs a `ClientSession` that keeps cookies) also
+works with `token=None`. `secure=True` switches to `https://` for deployments
+behind a TLS-terminating proxy.
 
 Factored out of the Home Assistant integration so the request/response
 handling -- the part worth testing -- doesn't need a running Home Assistant.
