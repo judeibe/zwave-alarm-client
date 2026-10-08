@@ -117,7 +117,7 @@ async def _request(
                     retry_after = response.headers.get("Retry-After", "")
                     raise TooManyRequests(message, float(retry_after) if retry_after.isdigit() else None)
                 if status == 503:
-                    raise ServiceUnavailable(message)
+                    raise ServiceUnavailable(message, code)
                 response.raise_for_status()
             if status == 204:
                 return None

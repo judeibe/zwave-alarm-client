@@ -14,6 +14,10 @@ class CannotConnect(ZwaveAlarmError):
 class ServiceUnavailable(CannotConnect):
     """The service answered `503`: it is up but not ready (e.g. the Z-Wave driver is still starting)."""
 
+    def __init__(self, message: str = "", code: str = "") -> None:
+        super().__init__(message)
+        self.code = code
+
 
 class InvalidAuth(ZwaveAlarmError):
     """The service rejected the token, session or code (401)."""
