@@ -10,6 +10,10 @@ updates:
     directory: /
     patterns: ["*"]
     multi-ecosystem-group: dependencies
+    # aioresponses 0.7.9 (latest) breaks on aiohttp>=3.10; tests pin aiohttp<3.10.
+    # Remove once aioresponses supports newer aiohttp.
+    ignore:
+      - dependency-name: "aiohttp"
   - package-ecosystem: github-actions
     directory: /
     patterns: ["*"]
