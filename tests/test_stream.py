@@ -151,3 +151,24 @@ async def test_snapshot_without_keypads_is_still_delivered() -> None:
 
     assert events == [SNAPSHOT]
     assert "keypads" not in events[0]
+
+
+async def test_lock_messages_pass_through_including_unknown_fields() -> None:
+    lock = {"nodeId": 5, "model": "BE469", "settings": {"beeper": True}, "futureField": 1}
+    messages = [{**SNAPSHOT, "locks": [lock]}, {"type": "lock.changed", "lock": lock}]
+
+    async def handler(request: web.Request) -> web.WebSocketResponse:
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        for message in messages:
+            await ws.send_json(message)
+        await ws.close()
+        return ws
+
+    server = await _serve(handler)
+    try:
+        events = await _collect(server)
+    finally:
+        await server.close()
+
+    assert events == messages
