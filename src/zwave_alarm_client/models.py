@@ -156,3 +156,149 @@ class KeypadChanged(TypedDict):
 
     type: Literal["keypad.changed"]
     keypad: KeypadSummary
+
+
+# --- Schlage locks (BE469 / BE468; contracts/locks.md) -----------------------
+
+LockModel = Literal["BE469", "BE468"]
+AlarmMode = Literal["off", "alert", "tamper", "forced_entry"]
+ScheduleKind = Literal["weekDay", "yearDay", "dailyRepeating"]
+LockUserStatus = Literal["enabled", "disabled", "available"]
+# 0 = not supported, 1 = most sensitive, 3 = medium, 5 = least; 2 and 4 are undocumented intermediates.
+Sensitivity = Literal[0, 1, 2, 3, 4, 5]
+
+
+class LockSettings(TypedDict):
+    """Writable parameters 0x03-0x05, 0x07-0x0B, 0x0F and 0x10; any value is `None` until the lock reports it.
+
+    The BE469-only settings are always `None` on a BE468 (and absent from its `supportedSettings`).
+    """
+
+    beeper: bool | None  # 0x03
+    vacationMode: bool | None  # 0x04
+    lockAndLeave: bool | None  # 0x05
+    autoLock: bool | None  # 0x0F
+    pinLength: int | None  # 0x10, 4-8, default 4
+    alarmMode: AlarmMode | None  # 0x07, BE469 only
+    alertSensitivity: Sensitivity | None  # 0x08, BE469 only
+    tamperSensitivity: Sensitivity | None  # 0x09, BE469 only
+    kickSensitivity: Sensitivity | None  # 0x0A, BE469 only
+    localControls: bool | None  # 0x0B, BE469 only; True = local control enabled
+
+
+class LockSettingsUpdate(TypedDict, total=False):
+    """Any non-empty subset of the writable `LockSettings` for `PATCH /locks/{nodeId}/settings`."""
+
+    beeper: bool
+    vacationMode: bool
+    lockAndLeave: bool
+    autoLock: bool
+    pinLength: int
+    alarmMode: AlarmMode
+    alertSensitivity: Sensitivity
+    tamperSensitivity: Sensitivity
+    kickSensitivity: Sensitivity
+    localControls: bool
+
+
+class LockDiagnostics(TypedDict):
+    """Read-only parameters 0x06, 0x0C-0x0E, 0x11 and 0x12; any value is `None` until the lock reports it."""
+
+    electronicTransitionCount: int | None  # 0x0C
+    mechanicalTransitionCount: int | None  # 0x0D
+    electronicFailedCount: int | None  # 0x0E
+    electronicHighPreloadTransitionCount: int | None  # 0x11, a subset of 0x0C
+    bootloaderVersion: int | None  # 0x12
+    userSlotBitField: list[int] | None  # 0x06: 4 bytes, bytes 1-3 = slots 1-24, byte 4 = slots 25-30, LSB lowest
+    occupiedUserSlots: list[int] | None  # 0x06 decoded to slot numbers 1-30
+
+
+class LockScheduleSlots(TypedDict):
+    """Schedule Entry Lock slots available per user, for each schedule kind."""
+
+    weekDay: int
+    yearDay: int
+    dailyRepeating: int
+
+
+class LockSummary(TypedDict):
+    """A lock as listed by `GET /locks` and carried by `lock.changed` and the snapshot's `locks`.
+
+    Create entities from `supportedSettings`, not from the model. The service may add fields; ignore those.
+    """
+
+    nodeId: int
+    model: LockModel
+    label: str
+    connectivityStatus: Literal["online", "offline"]
+    batteryLevel: int | None
+    supportedSettings: list[str]
+    settings: LockSettings
+    diagnostics: LockDiagnostics
+    scheduleSlots: LockScheduleSlots
+    userSlotCount: int
+
+
+class LockUser(TypedDict):
+    """One user slot (1-30) from `GET /locks/{nodeId}/users`; the code itself is never returned."""
+
+    userId: int
+    status: LockUserStatus
+
+
+class LockUserCode(TypedDict):
+    """Result of setting a code."""
+
+    userId: int
+    status: Literal["enabled", "disabled"]
+
+
+class WeekDaySchedule(TypedDict):
+    """`weekday` is 0 (Sunday) to 6 (Saturday); stop is after start."""
+
+    weekday: int
+    startHour: int
+    startMinute: int
+    stopHour: int
+    stopMinute: int
+
+
+class YearDaySchedule(TypedDict):
+    """A date range; years are two digits (26 = 2026), stop is after start."""
+
+    startYear: int
+    startMonth: int
+    startDay: int
+    startHour: int
+    startMinute: int
+    stopYear: int
+    stopMonth: int
+    stopDay: int
+    stopHour: int
+    stopMinute: int
+
+
+class DailyRepeatingSchedule(TypedDict):
+    """`weekdays` are numbers 0 (Sunday) to 6 (Saturday)."""
+
+    weekdays: list[int]
+    startHour: int
+    startMinute: int
+    durationHour: int
+    durationMinute: int
+
+
+class LockSchedule(TypedDict):
+    """`GET /locks/{nodeId}/users/{userId}/schedules/{kind}/{slotId}`; `schedule` is `None` for an empty slot."""
+
+    kind: ScheduleKind
+    userId: int
+    slotId: int
+    schedule: WeekDaySchedule | YearDaySchedule | DailyRepeatingSchedule | None
+
+
+class LockChanged(TypedDict):
+    """A `lock.changed` stream message: a lock appeared or any of its state changed (also when the lock reports on its own)."""
+
+    type: Literal["lock.changed"]
+    lock: LockSummary
