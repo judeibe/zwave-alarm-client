@@ -27,7 +27,7 @@ Every call takes `(session, host, port, token, ...)`; `token` is optional: pass 
 | Lockout policy | `async_get_lockout_policy`, `async_update_lockout_policy` |
 | Events | `async_get_events` |
 | HA links | `async_create_ha_link`, `async_delete_ha_link` |
-| Keypads | `async_list_keypads`, `async_chime_keypad` |
+| Keypads | `async_list_keypads`, `async_chime_keypad`, `async_get_keypad_settings`, `async_update_keypad_settings` (`requireCodeToArm`; administrator to change) |
 | Schlage locks | `async_list_locks`, `async_get_lock`, `async_refresh_lock`, `async_update_lock_settings`, `async_list_lock_users`, `async_set_lock_user_code`, `async_clear_lock_user_code`, `async_get_lock_schedule_slots`, `async_set_lock_schedules_enabled`, `async_get_lock_schedule`, `async_set_lock_schedule`, `async_clear_lock_schedule`; `validate_lock_code` (see below) |
 | Push channel | `async_stream_events` (sends keepalive pings, drops `pong`s; reconnect policy is the caller's) |
 

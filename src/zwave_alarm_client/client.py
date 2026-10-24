@@ -47,6 +47,8 @@ from .models import (
     ArmMode,
     DiscoverableSensor,
     HaLink,
+    KeypadSettings,
+    KeypadSettingsUpdate,
     KeypadSummary,
     LockoutPolicy,
     LockoutPolicyUpdate,
@@ -514,6 +516,30 @@ async def async_chime_keypad(
     if volume is not None:
         body["volume"] = volume
     await _request(session, "POST", host, port, token, f"/keypads/{node_id}/chime", secure=secure, json=body)
+
+
+
+async def async_get_keypad_settings(
+    session: aiohttp.ClientSession, host: str, port: int, token: str | None, *, secure: bool = False
+) -> KeypadSettings:
+    """`GET /keypad-settings`: whether arming from a keypad needs a code (administrator or member)."""
+    return await _request(session, "GET", host, port, token, "/keypad-settings", secure=secure)
+
+
+async def async_update_keypad_settings(
+    session: aiohttp.ClientSession,
+    host: str,
+    port: int,
+    token: str | None,
+    update: KeypadSettingsUpdate,
+    *,
+    secure: bool = False,
+) -> KeypadSettings:
+    """`PATCH /keypad-settings` (administrator only) with any non-empty subset of the settings.
+
+    `403` -> `Forbidden`; `400` (empty or malformed body) -> `BadRequest`.
+    """
+    return await _request(session, "PATCH", host, port, token, "/keypad-settings", secure=secure, json=dict(update))
 
 
 # --- Schlage locks (BE469 / BE468; contracts/locks.md) -----------------------
