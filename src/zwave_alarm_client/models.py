@@ -256,6 +256,7 @@ class LockSummary(TypedDict):
     diagnostics: LockDiagnostics
     scheduleSlots: LockScheduleSlots
     userSlotCount: int
+    locked: NotRequired[bool | None]  # True = bolt thrown, False = retracted, None = not reported yet
     capabilities: NotRequired[LockCapabilities]  # absent on services that predate it; use `lock_capabilities()`
 
 
@@ -361,3 +362,15 @@ class LockRemoved(TypedDict):
 
     type: Literal["lock.removed"]
     nodeId: int
+
+
+class UnenrollResult(TypedDict):
+    """Result of `DELETE /locks/{nodeId}/enrollment`. The lock is always unenrolled, even when `cleared` is `False`.
+
+    When `cleared` is `False` the lock's codes may still work: tell the user to clear them at the lock. `failures`
+    holds one human-readable line per step that failed (a single entry when the lock was unreachable).
+    """
+
+    nodeId: int
+    cleared: bool
+    failures: list[str]

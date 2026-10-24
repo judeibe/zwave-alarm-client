@@ -67,6 +67,10 @@ class BadRequest(ZwaveAlarmError):
     """The request failed schema validation (400); `str(err)` names the offending field."""
 
 
+class ScheduleKindUnsupported(BadRequest):
+    """The lock reports no slots for that schedule kind (400 `schedule_kind_unsupported`); gate on `lock_supports_schedule`."""
+
+
 class TooManyRequests(ZwaveAlarmError):
     """Login is rate-limited per client IP (429); `retry_after` is the `Retry-After` header in seconds, if sent."""
 

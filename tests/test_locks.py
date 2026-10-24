@@ -297,19 +297,41 @@ async def test_enroll_lock_is_put_to_enrollment_and_maps_errors() -> None:
     assert isinstance(secure_err.value, api.Conflict)
 
 
-async def test_unenroll_lock_is_delete_enrollment() -> None:
+async def test_unenroll_lock_returns_typed_result() -> None:
+    ok = {"nodeId": 5, "cleared": True, "failures": []}
+    partial = {"nodeId": 6, "cleared": False, "failures": ["weekDay schedule 1/1: the lock did not answer"]}
     with aioresponses() as mocked:
-        mocked.delete(f"{BASE}/locks/5/enrollment", status=204)
+        mocked.delete(f"{BASE}/locks/5/enrollment", payload=ok)
+        mocked.delete(f"{BASE}/locks/6/enrollment", payload=partial)
         mocked.delete(f"{BASE}/locks/9/enrollment", status=404)
-        assert await _call(api.async_unenroll_lock, TOKEN, 5) is None
+        assert await _call(api.async_unenroll_lock, TOKEN, 5) == ok
+        result = await _call(api.async_unenroll_lock, TOKEN, 6)
         with pytest.raises(api.NotFound):
             await _call(api.async_unenroll_lock, TOKEN, 9)
+    assert result["cleared"] is False and result["failures"] == partial["failures"]
+
+
+async def test_set_locked_puts_state_and_maps_errors() -> None:
+    with aioresponses() as mocked:
+        mocked.put(f"{BASE}/locks/5/state", payload={**LOCK, "locked": False})
+        mocked.put(f"{BASE}/locks/5/state", status=502, payload=_error("lock_unavailable", "no answer"))
+        mocked.put(f"{BASE}/locks/9/state", status=404)
+        lock = await _call(api.async_set_locked, TOKEN, 5, True)
+        with pytest.raises(api.LockUnavailable):
+            await _call(api.async_set_locked, TOKEN, 5, False)
+        with pytest.raises(api.NotFound):
+            await _call(api.async_set_locked, TOKEN, 9, True)
+        import json
+        sent = mocked.requests[("PUT", URL(f"{BASE}/locks/5/state"))]
+    assert lock["locked"] is False  # may still show the old state; lock.changed carries the new one
+    assert [json.loads(c.kwargs["data"]) if "data" in c.kwargs else c.kwargs["json"] for c in sent][0] == {"locked": True}
 
 
 async def test_schedule_on_unsupported_kind_is_bad_request() -> None:
     with aioresponses() as mocked:
         mocked.get(
-            f"{BASE}/locks/5/users/1/schedules/yearDay/1", status=400, payload=_error("bad_request", "no yearDay slots")
+            f"{BASE}/locks/5/users/1/schedules/yearDay/1", status=400, payload=_error("schedule_kind_unsupported", "no yearDay slots")
         )
-        with pytest.raises(api.BadRequest, match="yearDay"):
+        with pytest.raises(api.ScheduleKindUnsupported, match="yearDay") as err:
             await _call(api.async_get_lock_schedule, TOKEN, 5, 1, "yearDay", 1)
+    assert isinstance(err.value, api.BadRequest)

@@ -30,12 +30,14 @@ from .errors import (
     LockNotSecure,
     LockUnavailable,
     NotFound,
+    ScheduleKindUnsupported,
     ServiceUnavailable,
     TooManyRequests,
     ZoneInUse,
     ZoneNotEmpty,
 )
 from .models import (
+    UnenrollResult,
     DailyRepeatingSchedule,
     LockSchedule,
     AvailableLock,
@@ -117,6 +119,8 @@ async def _request(
             if status >= 400:
                 code, message = await _error_body(response)
                 if status == 400:
+                    if code == "schedule_kind_unsupported":
+                        raise ScheduleKindUnsupported(message)
                     raise BadRequest(message)
                 if status == 401:
                     raise InvalidAuth(message)
@@ -818,9 +822,32 @@ async def async_enroll_lock(
 
 async def async_unenroll_lock(
     session: aiohttp.ClientSession, host: str, port: int, token: str | None, node_id: int, *, secure: bool = False
-) -> None:
-    """`DELETE /locks/{nodeId}/enrollment` (administrators, idempotent): remove the lock from the alarm system.
+) -> UnenrollResult:
+    """`DELETE /locks/{nodeId}/enrollment` (administrators, idempotent): clear the lock, then remove it from the alarm system.
 
-    The lock stays paired; the stream sends `lock.removed`. `404` (unknown node) -> `NotFound`.
+    The service first deletes the user codes and schedules on the lock, then unenrolls it, always: an unreachable
+    lock is still unenrolled and reported with `cleared=False` and `failures` (codes may still work on it). A lock
+    that is not enrolled returns `cleared=True`. The stream sends `lock.removed`. `404` (unknown node) -> `NotFound`.
     """
-    await _request(session, "DELETE", host, port, token, f"/locks/{node_id}/enrollment", secure=secure)
+    return await _request(session, "DELETE", host, port, token, f"/locks/{node_id}/enrollment", secure=secure)
+
+
+async def async_set_locked(
+    session: aiohttp.ClientSession,
+    host: str,
+    port: int,
+    token: str | None,
+    node_id: int,
+    locked: bool,
+    *,
+    secure: bool = False,
+) -> LockSummary:
+    """`PUT /locks/{nodeId}/state` with `{locked}`: `True` throws the bolt, `False` retracts it.
+
+    The bolt moves after the lock answers, so the returned summary may still show the old `locked`; the new state
+    arrives as `lock.changed`. `404` (unknown or not enrolled) -> `NotFound`; `502 lock_unavailable` ->
+    `LockUnavailable`.
+    """
+    return await _request(
+        session, "PUT", host, port, token, f"/locks/{node_id}/state", secure=secure, json={"locked": locked}
+    )
