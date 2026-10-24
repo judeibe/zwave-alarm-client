@@ -27,16 +27,21 @@ from .errors import (
     Conflict,
     Forbidden,
     InvalidAuth,
+    LockNotSecure,
     LockUnavailable,
     NotFound,
+    ScheduleKindUnsupported,
     ServiceUnavailable,
     TooManyRequests,
     ZoneInUse,
     ZoneNotEmpty,
 )
 from .models import (
+    UnenrollResult,
     DailyRepeatingSchedule,
     LockSchedule,
+    AvailableLock,
+    LockCapabilities,
     LockScheduleSlots,
     LockSettingsUpdate,
     LockSummary,
@@ -114,6 +119,8 @@ async def _request(
             if status >= 400:
                 code, message = await _error_body(response)
                 if status == 400:
+                    if code == "schedule_kind_unsupported":
+                        raise ScheduleKindUnsupported(message)
                     raise BadRequest(message)
                 if status == 401:
                     raise InvalidAuth(message)
@@ -128,6 +135,8 @@ async def _request(
                         raise ZoneInUse(message)
                     if code == "code_in_use":
                         raise CodeInUse(message)
+                    if code == "lock_not_secure":
+                        raise LockNotSecure(message)
                     raise conflict(message)
                 if status == 423:
                     raise AccountLocked(message)
@@ -556,6 +565,32 @@ def validate_lock_code(code: str, pin_length: int | None = None) -> None:
         raise BadRequest(f"lock code must be {pin_length} digits (the lock's configured PIN length)")
 
 
+def lock_capabilities(lock: LockSummary) -> LockCapabilities:
+    """Per-lock capability flags in the service's shape, plus `userSlots` from `userSlotCount`.
+
+    Uses the lock's `capabilities` as sent (schedule flags stay tri-state: `None` = not reported yet). Only for an
+    older service that sends none are they derived from `userSlotCount`, `scheduleSlots` (0 slots = `False`) and
+    `supportedSettings`, with `secure` unknown.
+    """
+    user_slots = int(lock.get("userSlotCount") or 0)
+    sent = lock.get("capabilities")
+    if sent is not None:
+        return {**sent, "userSlots": user_slots}
+    slots = lock.get("scheduleSlots") or {}
+    return {
+        "secure": None,
+        "userCodes": user_slots > 0,
+        "schedules": {k: int(slots.get(k) or 0) > 0 for k in ("weekDay", "yearDay", "dailyRepeating")},  # type: ignore[typeddict-item]
+        "alarmSettings": "alarmMode" in lock.get("supportedSettings", []),
+        "userSlots": user_slots,
+    }
+
+
+def lock_supports_schedule(lock: LockSummary, kind: ScheduleKind) -> bool | None:
+    """Whether `kind` schedules can be used: `False` means the lock has no slots (the service answers `400`)."""
+    return lock_capabilities(lock)["schedules"][kind]
+
+
 def _validate_lock_settings(update: LockSettingsUpdate) -> None:
     if not update:
         raise BadRequest("settings update must set at least one field")
@@ -756,4 +791,63 @@ async def async_clear_lock_schedule(
     """`DELETE /locks/{nodeId}/users/{userId}/schedules/{kind}/{slotId}`."""
     await _request(
         session, "DELETE", host, port, token, f"/locks/{node_id}/users/{user_id}/schedules/{kind}/{slot_id}", secure=secure
+    )
+
+
+# --- Lock enrollment (contracts/locks.md) -------------------------------------------------------------------------
+
+
+async def async_list_discoverable_locks(
+    session: aiohttp.ClientSession, host: str, port: int, token: str | None, *, secure: bool = False
+) -> list[AvailableLock]:
+    """`GET /locks/available` (administrators): Schlage locks paired to the controller but not enrolled.
+
+    Use it only to offer "add lock"; never create Home Assistant devices or entities from it. `GET /locks`, the
+    snapshot and `lock.changed` carry enrolled locks only. Unwrapped from `{ "locks": [...] }`.
+    """
+    body = await _request(session, "GET", host, port, token, "/locks/available", secure=secure)
+    return body["locks"]
+
+
+async def async_enroll_lock(
+    session: aiohttp.ClientSession, host: str, port: int, token: str | None, node_id: int, *, secure: bool = False
+) -> LockSummary:
+    """`PUT /locks/{nodeId}/enrollment` (administrators, idempotent): add a paired lock to the alarm system.
+
+    `404` (unknown node) -> `NotFound`; `409 lock_not_secure` (included without S0/S2) -> `LockNotSecure`;
+    `502 lock_unavailable` -> `LockUnavailable`. Returns the enrolled lock.
+    """
+    return await _request(session, "PUT", host, port, token, f"/locks/{node_id}/enrollment", secure=secure)
+
+
+async def async_unenroll_lock(
+    session: aiohttp.ClientSession, host: str, port: int, token: str | None, node_id: int, *, secure: bool = False
+) -> UnenrollResult:
+    """`DELETE /locks/{nodeId}/enrollment` (administrators, idempotent): clear the lock, then remove it from the alarm system.
+
+    The service first deletes the user codes and schedules on the lock, then unenrolls it, always: an unreachable
+    lock is still unenrolled and reported with `cleared=False` and `failures` (codes may still work on it). A lock
+    that is not enrolled returns `cleared=True`. The stream sends `lock.removed`. `404` (unknown node) -> `NotFound`.
+    """
+    return await _request(session, "DELETE", host, port, token, f"/locks/{node_id}/enrollment", secure=secure)
+
+
+async def async_set_locked(
+    session: aiohttp.ClientSession,
+    host: str,
+    port: int,
+    token: str | None,
+    node_id: int,
+    locked: bool,
+    *,
+    secure: bool = False,
+) -> LockSummary:
+    """`PUT /locks/{nodeId}/state` with `{locked}`: `True` throws the bolt, `False` retracts it.
+
+    The bolt moves after the lock answers, so the returned summary may still show the old `locked`; the new state
+    arrives as `lock.changed`. `404` (unknown or not enrolled) -> `NotFound`; `502 lock_unavailable` ->
+    `LockUnavailable`.
+    """
+    return await _request(
+        session, "PUT", host, port, token, f"/locks/{node_id}/state", secure=secure, json={"locked": locked}
     )

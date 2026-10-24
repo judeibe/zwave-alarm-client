@@ -55,12 +55,20 @@ class CodeInUse(Conflict):
     """Another user already has this code (409 `code_in_use`); codes must be unique because login identifies by code."""
 
 
+class LockNotSecure(Conflict):
+    """Enrolling a lock included without S0/S2 (409 `lock_not_secure`): exclude it and include it again securely."""
+
+
 class CommandRejected(Conflict):
     """A conflicting concurrent arm/disarm won the race (409, FR-014)."""
 
 
 class BadRequest(ZwaveAlarmError):
     """The request failed schema validation (400); `str(err)` names the offending field."""
+
+
+class ScheduleKindUnsupported(BadRequest):
+    """The lock reports no slots for that schedule kind (400 `schedule_kind_unsupported`); gate on `lock_supports_schedule`."""
 
 
 class TooManyRequests(ZwaveAlarmError):

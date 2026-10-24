@@ -256,6 +256,40 @@ class LockSummary(TypedDict):
     diagnostics: LockDiagnostics
     scheduleSlots: LockScheduleSlots
     userSlotCount: int
+    locked: NotRequired[bool | None]  # True = bolt thrown, False = retracted, None = not reported yet
+    capabilities: NotRequired[LockCapabilities]  # absent on services that predate it; use `lock_capabilities()`
+
+
+class LockScheduleCapabilities(TypedDict):
+    """Per schedule kind: `True` supported, `False` the lock has no slots (writing is `400`), `None` not reported yet."""
+
+    weekDay: bool | None
+    yearDay: bool | None
+    dailyRepeating: bool | None
+
+
+class LockCapabilities(TypedDict):
+    """What a lock supports, so UIs can hide controls it lacks (the BE469 commonly reports no daily-repeating slots).
+
+    `secure` is `None` while unknown; user codes and schedules need S0/S2. `userSlots` is added by
+    `lock_capabilities()` from `userSlotCount`; the service does not send it inside `capabilities`.
+    """
+
+    secure: bool | None
+    userCodes: bool
+    schedules: LockScheduleCapabilities
+    alarmSettings: bool  # BE469 alarm mode / sensitivities / local controls
+    userSlots: NotRequired[int]
+
+
+class AvailableLock(TypedDict):
+    """A lock that is paired but not enrolled (`GET /locks/available`, administrators only). Not a device source."""
+
+    nodeId: int
+    model: LockModel
+    label: str
+    connectivityStatus: Literal["online", "offline"]
+    secure: bool | None
 
 
 class LockUser(TypedDict):
@@ -321,3 +355,22 @@ class LockChanged(TypedDict):
 
     type: Literal["lock.changed"]
     lock: LockSummary
+
+
+class LockRemoved(TypedDict):
+    """A `lock.removed` stream message: the lock was unenrolled or left the network; remove its device and entities."""
+
+    type: Literal["lock.removed"]
+    nodeId: int
+
+
+class UnenrollResult(TypedDict):
+    """Result of `DELETE /locks/{nodeId}/enrollment`. The lock is always unenrolled, even when `cleared` is `False`.
+
+    When `cleared` is `False` the lock's codes may still work: tell the user to clear them at the lock. `failures`
+    holds one human-readable line per step that failed (a single entry when the lock was unreachable).
+    """
+
+    nodeId: int
+    cleared: bool
+    failures: list[str]

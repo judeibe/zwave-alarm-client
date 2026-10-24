@@ -28,7 +28,7 @@ Every call takes `(session, host, port, token, ...)`; `token` is optional: pass 
 | Events | `async_get_events` |
 | HA links | `async_create_ha_link`, `async_delete_ha_link` |
 | Keypads | `async_list_keypads`, `async_chime_keypad`, `async_get_keypad_settings`, `async_update_keypad_settings` (`requireCodeToArm`; administrator to change) |
-| Schlage locks | `async_list_locks`, `async_get_lock`, `async_refresh_lock`, `async_update_lock_settings`, `async_list_lock_users`, `async_set_lock_user_code`, `async_clear_lock_user_code`, `async_get_lock_schedule_slots`, `async_set_lock_schedules_enabled`, `async_get_lock_schedule`, `async_set_lock_schedule`, `async_clear_lock_schedule`; `validate_lock_code` (see below) |
+| Schlage locks | `async_list_locks`, `async_get_lock`, `async_refresh_lock`, `async_update_lock_settings`, `async_list_lock_users`, `async_set_lock_user_code`, `async_clear_lock_user_code`, `async_get_lock_schedule_slots`, `async_set_lock_schedules_enabled`, `async_get_lock_schedule`, `async_set_lock_schedule`, `async_clear_lock_schedule`, `async_list_discoverable_locks`, `async_enroll_lock`, `async_unenroll_lock`, `async_set_locked`; `lock_capabilities`, `lock_supports_schedule`, `validate_lock_code` (see below) |
 | Push channel | `async_stream_events` (sends keepalive pings, drops `pong`s; reconnect policy is the caller's) |
 
 ### Schlage locks (BE469 / BE468)
@@ -64,11 +64,17 @@ Codes must be 4-8 digits: `async_set_lock_user_code` and `validate_lock_code` ra
 
 The stream carries `lock.changed` (`{lock: LockSummary}`) and the snapshot gains `locks`; see `LockChanged`.
 
+**Enrollment.** A lock is only *paired* until an administrator enrolls it. `GET /locks`, the snapshot's `locks` and `lock.changed` carry enrolled locks only, so every `LockSummary` you receive is enrolled (there is no `enrolled` field): create a device from it, and remove the device on `lock.removed` (`{nodeId}`, `LockRemoved`; sent on unenroll and when the node leaves the network). `async_list_discoverable_locks` (`GET /locks/available`, administrators) returns `AvailableLock` (`nodeId`, `model`, `label`, `connectivityStatus`, `secure`) to choose from; never build devices from it. `async_enroll_lock` (`PUT /locks/{nodeId}/enrollment`, returns the `LockSummary`) and `async_unenroll_lock` (`DELETE`) are idempotent and administrator-only. Unenrolling first clears the lock's user codes and schedules, then always unenrolls, and returns `UnenrollResult` (`{nodeId, cleared, failures}`): when `cleared` is `False` (e.g. the lock was unreachable) its codes may still work, so tell the user to clear them at the lock; enrolling a lock included without S0/S2 raises `LockNotSecure` (a `Conflict`, `409 lock_not_secure`): exclude and re-include it securely.
+
+**Lock and unlock.** `LockSummary.locked` is `True` (bolt thrown), `False` (retracted) or `None` (not reported); it also follows keypad, thumb-turn and auto-lock events. `async_set_locked(node_id, locked)` (`PUT /locks/{nodeId}/state`) returns the `LockSummary` as it was when the lock answered, which may still show the old state: wait for `lock.changed`. `502 lock_unavailable` -> `LockUnavailable`.
+
+**Capabilities.** `lock_capabilities(lock)` returns `LockCapabilities`: `secure` (`bool | None`), `userCodes`, `alarmSettings`, `schedules` (`weekDay` / `yearDay` / `dailyRepeating`, each `True`, `False` or `None` = not reported yet) and `userSlots` (from `userSlotCount`). Hide anything `False`; treat `None` as unknown and refresh. `lock_supports_schedule(lock, kind)` is the shortcut. Reading or writing a kind with no slots is `400 schedule_kind_unsupported`, raised as `ScheduleKindUnsupported` (a `BadRequest`). Only for an older service with no `capabilities` are the flags derived from `scheduleSlots` (0 slots = `False`) and `supportedSettings`.
+
 Response shapes are available as `TypedDict`s in `zwave_alarm_client.models`.
 
 ## Errors
 
-All derive from `ZwaveAlarmError`: `CannotConnect` (unreachable, timeout, 5xx; `ServiceUnavailable` for 503), `InvalidAuth` (401), `Forbidden` (403), `NotFound` (404), `BadRequest` (400, message names the field), `Conflict` (409; `CommandRejected` for a lost arm/disarm race, `ZoneNotEmpty`, `ZoneInUse`, `CodeInUse`), `AccountLocked` (423), `TooManyRequests` (429, `.retry_after`), `LockUnavailable` (502 `lock_unavailable`, a `CannotConnect`).
+All derive from `ZwaveAlarmError`: `CannotConnect` (unreachable, timeout, 5xx; `ServiceUnavailable` for 503), `InvalidAuth` (401), `Forbidden` (403), `NotFound` (404), `BadRequest` (400, message names the field), `Conflict` (409; `CommandRejected` for a lost arm/disarm race, `ZoneNotEmpty`, `ZoneInUse`, `CodeInUse`), `AccountLocked` (423), `TooManyRequests` (429, `.retry_after`), `ScheduleKindUnsupported` (400 `schedule_kind_unsupported`, a `BadRequest`), `LockNotSecure` (409 `lock_not_secure`, a `Conflict`), `LockUnavailable` (502 `lock_unavailable`, a `CannotConnect`).
 
 ## Development
 
