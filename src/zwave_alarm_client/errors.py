@@ -19,6 +19,10 @@ class ServiceUnavailable(CannotConnect):
         self.code = code
 
 
+class LockUnavailable(CannotConnect):
+    """The service answered `502 lock_unavailable`: the lock did not answer or rejected a write."""
+
+
 class InvalidAuth(ZwaveAlarmError):
     """The service rejected the token, session or code (401)."""
 
