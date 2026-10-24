@@ -204,6 +204,24 @@ async def test_list_keypads_empty() -> None:
         assert await _call(api.async_list_keypads, TOKEN) == []
 
 
+async def test_keypad_settings_get_and_patch() -> None:
+    settings = {"requireCodeToArm": True}
+    with aioresponses() as mocked:
+        mocked.get(f"{BASE}/keypad-settings", payload=settings)
+        mocked.patch(f"{BASE}/keypad-settings", payload=settings)
+        assert await _call(api.async_get_keypad_settings, TOKEN) == settings
+        assert await _call(api.async_update_keypad_settings, TOKEN, {"requireCodeToArm": True}) == settings
+        patch = mocked.requests[("PATCH", next(k for m, k in mocked.requests if m == "PATCH"))][0]
+    assert patch.kwargs["json"] == {"requireCodeToArm": True}
+
+
+async def test_keypad_settings_update_forbidden_for_non_admin() -> None:
+    with aioresponses() as mocked:
+        mocked.patch(f"{BASE}/keypad-settings", status=403, payload={"error": {"code": "forbidden", "message": "no"}})
+        with pytest.raises(api.Forbidden):
+            await _call(api.async_update_keypad_settings, TOKEN, {"requireCodeToArm": True})
+
+
 async def test_chime_keypad_posts_sound_and_volume() -> None:
     with aioresponses() as mocked:
         mocked.post(f"{BASE}/keypads/12/chime", status=204)

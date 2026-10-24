@@ -131,6 +131,18 @@ class KeypadSummary(TypedDict):
     batteryLevel: int | None
 
 
+class KeypadSettings(TypedDict):
+    """`GET /keypad-settings`, also the snapshot's `keypadSettings` and a `keypad.settings` message's `settings`."""
+
+    requireCodeToArm: bool  # arming from a keypad needs a valid user code; disarming always does
+
+
+class KeypadSettingsUpdate(TypedDict, total=False):
+    """Any non-empty subset of `KeypadSettings` for `PATCH /keypad-settings`."""
+
+    requireCodeToArm: bool
+
+
 class KeypadInput(TypedDict):
     """The `input` of a `keypad.event`; never carries the code.
 
@@ -156,6 +168,13 @@ class KeypadChanged(TypedDict):
 
     type: Literal["keypad.changed"]
     keypad: KeypadSummary
+
+
+class KeypadSettingsChanged(TypedDict):
+    """A `keypad.settings` stream message: an administrator changed the keypad settings."""
+
+    type: Literal["keypad.settings"]
+    settings: KeypadSettings
 
 
 # --- Schlage locks (BE469 / BE468; contracts/locks.md) -----------------------
