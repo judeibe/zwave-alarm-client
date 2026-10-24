@@ -14,7 +14,7 @@ handling -- the part worth testing -- doesn't need a running Home Assistant.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 import aiohttp
 
@@ -27,6 +27,7 @@ from .errors import (
     Conflict,
     Forbidden,
     InvalidAuth,
+    LockUnavailable,
     NotFound,
     ServiceUnavailable,
     TooManyRequests,
@@ -34,6 +35,15 @@ from .errors import (
     ZoneNotEmpty,
 )
 from .models import (
+    DailyRepeatingSchedule,
+    LockSchedule,
+    LockScheduleSlots,
+    LockSettingsUpdate,
+    LockSummary,
+    LockUser,
+    LockUserCode,
+    WeekDaySchedule,
+    YearDaySchedule,
     ArmMode,
     DiscoverableSensor,
     HaLink,
@@ -44,12 +54,16 @@ from .models import (
     Role,
     SecurityEvent,
     SensorCategory,
+    ScheduleKind,
     SensorUpdate,
     User,
     UserUpdate,
     Zone,
     ZoneUpdate,
 )
+
+LOCK_PIN_LENGTHS = range(4, 9)  # Schlage parameter 0x10: 4-8 digits, default 4
+LOCK_SENSITIVITIES = range(0, 6)  # parameters 0x08-0x0A: 0 = not supported, 1 = most ... 5 = least
 
 REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=10)
 API_PREFIX = "/api/v1"
@@ -118,6 +132,8 @@ async def _request(
                 if status == 429:
                     retry_after = response.headers.get("Retry-After", "")
                     raise TooManyRequests(message, float(retry_after) if retry_after.isdigit() else None)
+                if status == 502 and code == "lock_unavailable":
+                    raise LockUnavailable(message)
                 if status == 503:
                     raise ServiceUnavailable(message, code)
                 response.raise_for_status()
@@ -498,3 +514,220 @@ async def async_chime_keypad(
     if volume is not None:
         body["volume"] = volume
     await _request(session, "POST", host, port, token, f"/keypads/{node_id}/chime", secure=secure, json=body)
+
+
+# --- Schlage locks (BE469 / BE468; contracts/locks.md) -----------------------
+
+
+def validate_lock_code(code: str, pin_length: int | None = None) -> None:
+    """Raise `BadRequest` unless `code` is 4-8 digits (the lock's PIN range), and `pin_length` long if given.
+
+    Checked locally so a bad code never leaves the process; the service still enforces the lock's configured length.
+    """
+    if not code.isascii() or not code.isdigit() or len(code) not in LOCK_PIN_LENGTHS:
+        raise BadRequest("lock code must be 4-8 digits")
+    if pin_length is not None and len(code) != pin_length:
+        raise BadRequest(f"lock code must be {pin_length} digits (the lock's configured PIN length)")
+
+
+def _validate_lock_settings(update: LockSettingsUpdate) -> None:
+    if not update:
+        raise BadRequest("settings update must set at least one field")
+    if "pinLength" in update and update["pinLength"] not in LOCK_PIN_LENGTHS:
+        raise BadRequest("pinLength must be between 4 and 8")
+    for field in ("alertSensitivity", "tamperSensitivity", "kickSensitivity"):
+        if field in update and update[field] not in LOCK_SENSITIVITIES:  # type: ignore[literal-required]
+            raise BadRequest(f"{field} must be between 0 and 5")
+
+
+async def async_list_locks(
+    session: aiohttp.ClientSession, host: str, port: int, token: str | None, *, secure: bool = False
+) -> list[LockSummary]:
+    """`GET /locks`: every Schlage lock the service has discovered.
+
+    The service wraps the list as `{ "locks": [...] }`; this returns the list itself. Values are `None` until the
+    lock reports them; create entities from each lock's `supportedSettings`.
+    """
+    body = await _request(session, "GET", host, port, token, "/locks", secure=secure)
+    return body["locks"]
+
+
+async def async_get_lock(
+    session: aiohttp.ClientSession, host: str, port: int, token: str | None, node_id: int, *, secure: bool = False
+) -> LockSummary:
+    """`GET /locks/{nodeId}`: one lock. `404` (unknown lock) -> `NotFound`."""
+    return await _request(session, "GET", host, port, token, f"/locks/{node_id}", secure=secure)
+
+
+async def async_refresh_lock(
+    session: aiohttp.ClientSession, host: str, port: int, token: str | None, node_id: int, *, secure: bool = False
+) -> LockSummary:
+    """`POST /locks/{nodeId}/refresh`: re-read every parameter and the schedule slot counts from the lock.
+
+    `502 lock_unavailable` -> `LockUnavailable`.
+    """
+    return await _request(session, "POST", host, port, token, f"/locks/{node_id}/refresh", secure=secure)
+
+
+async def async_update_lock_settings(
+    session: aiohttp.ClientSession,
+    host: str,
+    port: int,
+    token: str | None,
+    node_id: int,
+    update: LockSettingsUpdate,
+    *,
+    secure: bool = False,
+) -> LockSummary:
+    """`PATCH /locks/{nodeId}/settings` with any non-empty subset of the writable settings.
+
+    The service validates the whole body before writing anything. `pinLength` must be 4-8 and sensitivities 0-5
+    (`BadRequest` before sending); a BE469-only setting sent to a BE468 is a `400` -> `BadRequest`;
+    `502 lock_unavailable` -> `LockUnavailable`. Returns the lock with its refreshed settings.
+    """
+    _validate_lock_settings(update)
+    return await _request(
+        session, "PATCH", host, port, token, f"/locks/{node_id}/settings", secure=secure, json=dict(update)
+    )
+
+
+async def async_list_lock_users(
+    session: aiohttp.ClientSession, host: str, port: int, token: str | None, node_id: int, *, secure: bool = False
+) -> list[LockUser]:
+    """`GET /locks/{nodeId}/users`: status of user slots 1-30 (`enabled`, `disabled`, `available`); no codes.
+
+    The service wraps the list as `{ "users": [...] }`; this returns the list itself.
+    """
+    body = await _request(session, "GET", host, port, token, f"/locks/{node_id}/users", secure=secure)
+    return body["users"]
+
+
+async def async_set_lock_user_code(
+    session: aiohttp.ClientSession,
+    host: str,
+    port: int,
+    token: str | None,
+    node_id: int,
+    user_id: int,
+    code: str,
+    *,
+    status: Literal["enabled", "disabled"] | None = None,
+    pin_length: int | None = None,
+    secure: bool = False,
+) -> LockUserCode:
+    """`PUT /locks/{nodeId}/users/{userId}/code`: write-only; 4-8 digits, `status` defaults to enabled server-side.
+
+    Pass the lock's `settings["pinLength"]` as `pin_length` to also require that exact length (`BadRequest`);
+    the service enforces it too once known. Changing `pinLength` does not rewrite existing codes.
+    """
+    validate_lock_code(code, pin_length)
+    body: dict[str, Any] = {"code": code}
+    if status is not None:
+        body["status"] = status
+    return await _request(
+        session, "PUT", host, port, token, f"/locks/{node_id}/users/{user_id}/code", secure=secure, json=body
+    )
+
+
+async def async_clear_lock_user_code(
+    session: aiohttp.ClientSession, host: str, port: int, token: str | None, node_id: int, user_id: int, *, secure: bool = False
+) -> None:
+    """`DELETE /locks/{nodeId}/users/{userId}/code`."""
+    await _request(session, "DELETE", host, port, token, f"/locks/{node_id}/users/{user_id}/code", secure=secure)
+
+
+async def async_get_lock_schedule_slots(
+    session: aiohttp.ClientSession, host: str, port: int, token: str | None, node_id: int, *, secure: bool = False
+) -> LockScheduleSlots:
+    """`GET /locks/{nodeId}/schedules`: schedule slots available per user for each kind (unwrapped from `{ "slots" }`)."""
+    body = await _request(session, "GET", host, port, token, f"/locks/{node_id}/schedules", secure=secure)
+    return body["slots"]
+
+
+async def async_set_lock_schedules_enabled(
+    session: aiohttp.ClientSession,
+    host: str,
+    port: int,
+    token: str | None,
+    node_id: int,
+    user_id: int,
+    enabled: bool,
+    *,
+    secure: bool = False,
+) -> None:
+    """`PUT /locks/{nodeId}/users/{userId}/schedules/enabled`: turn schedule enforcement on or off for that user."""
+    await _request(
+        session,
+        "PUT",
+        host,
+        port,
+        token,
+        f"/locks/{node_id}/users/{user_id}/schedules/enabled",
+        secure=secure,
+        json={"enabled": enabled},
+    )
+
+
+async def async_get_lock_schedule(
+    session: aiohttp.ClientSession,
+    host: str,
+    port: int,
+    token: str | None,
+    node_id: int,
+    user_id: int,
+    kind: ScheduleKind,
+    slot_id: int,
+    *,
+    secure: bool = False,
+) -> LockSchedule:
+    """`GET /locks/{nodeId}/users/{userId}/schedules/{kind}/{slotId}`; `schedule` is `None` for an empty slot."""
+    return await _request(
+        session, "GET", host, port, token, f"/locks/{node_id}/users/{user_id}/schedules/{kind}/{slot_id}", secure=secure
+    )
+
+
+async def async_set_lock_schedule(
+    session: aiohttp.ClientSession,
+    host: str,
+    port: int,
+    token: str | None,
+    node_id: int,
+    user_id: int,
+    kind: ScheduleKind,
+    slot_id: int,
+    schedule: WeekDaySchedule | YearDaySchedule | DailyRepeatingSchedule,
+    *,
+    secure: bool = False,
+) -> None:
+    """`PUT /locks/{nodeId}/users/{userId}/schedules/{kind}/{slotId}` with the schedule for `kind`.
+
+    `slot_id` is 1..`scheduleSlots[kind]`; times, ranges and weekdays are validated by the service (`BadRequest`).
+    """
+    await _request(
+        session,
+        "PUT",
+        host,
+        port,
+        token,
+        f"/locks/{node_id}/users/{user_id}/schedules/{kind}/{slot_id}",
+        secure=secure,
+        json=dict(schedule),
+    )
+
+
+async def async_clear_lock_schedule(
+    session: aiohttp.ClientSession,
+    host: str,
+    port: int,
+    token: str | None,
+    node_id: int,
+    user_id: int,
+    kind: ScheduleKind,
+    slot_id: int,
+    *,
+    secure: bool = False,
+) -> None:
+    """`DELETE /locks/{nodeId}/users/{userId}/schedules/{kind}/{slotId}`."""
+    await _request(
+        session, "DELETE", host, port, token, f"/locks/{node_id}/users/{user_id}/schedules/{kind}/{slot_id}", secure=secure
+    )
