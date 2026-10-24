@@ -47,6 +47,7 @@ from .errors import (
 )
 from .models import (
     DiscoverableSensor,
+    KeypadChanged,
     KeypadEvent,
     KeypadInput,
     KeypadSummary,
@@ -66,6 +67,7 @@ __all__ = [
     "DiscoverableSensor",
     "Forbidden",
     "InvalidAuth",
+    "KeypadChanged",
     "KeypadEvent",
     "KeypadInput",
     "KeypadSummary",

@@ -149,3 +149,10 @@ class KeypadEvent(TypedDict):
     nodeId: int
     adapterId: str
     input: KeypadInput
+
+
+class KeypadChanged(TypedDict):
+    """A `keypad.changed` stream message: a keypad was discovered or its state (connectivity, battery, ...) changed."""
+
+    type: Literal["keypad.changed"]
+    keypad: KeypadSummary
