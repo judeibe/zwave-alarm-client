@@ -27,6 +27,7 @@ from .errors import (
     Conflict,
     Forbidden,
     InvalidAuth,
+    LockNotSecure,
     LockUnavailable,
     NotFound,
     ServiceUnavailable,
@@ -37,6 +38,8 @@ from .errors import (
 from .models import (
     DailyRepeatingSchedule,
     LockSchedule,
+    AvailableLock,
+    LockCapabilities,
     LockScheduleSlots,
     LockSettingsUpdate,
     LockSummary,
@@ -128,6 +131,8 @@ async def _request(
                         raise ZoneInUse(message)
                     if code == "code_in_use":
                         raise CodeInUse(message)
+                    if code == "lock_not_secure":
+                        raise LockNotSecure(message)
                     raise conflict(message)
                 if status == 423:
                     raise AccountLocked(message)
@@ -556,6 +561,32 @@ def validate_lock_code(code: str, pin_length: int | None = None) -> None:
         raise BadRequest(f"lock code must be {pin_length} digits (the lock's configured PIN length)")
 
 
+def lock_capabilities(lock: LockSummary) -> LockCapabilities:
+    """Per-lock capability flags in the service's shape, plus `userSlots` from `userSlotCount`.
+
+    Uses the lock's `capabilities` as sent (schedule flags stay tri-state: `None` = not reported yet). Only for an
+    older service that sends none are they derived from `userSlotCount`, `scheduleSlots` (0 slots = `False`) and
+    `supportedSettings`, with `secure` unknown.
+    """
+    user_slots = int(lock.get("userSlotCount") or 0)
+    sent = lock.get("capabilities")
+    if sent is not None:
+        return {**sent, "userSlots": user_slots}
+    slots = lock.get("scheduleSlots") or {}
+    return {
+        "secure": None,
+        "userCodes": user_slots > 0,
+        "schedules": {k: int(slots.get(k) or 0) > 0 for k in ("weekDay", "yearDay", "dailyRepeating")},  # type: ignore[typeddict-item]
+        "alarmSettings": "alarmMode" in lock.get("supportedSettings", []),
+        "userSlots": user_slots,
+    }
+
+
+def lock_supports_schedule(lock: LockSummary, kind: ScheduleKind) -> bool | None:
+    """Whether `kind` schedules can be used: `False` means the lock has no slots (the service answers `400`)."""
+    return lock_capabilities(lock)["schedules"][kind]
+
+
 def _validate_lock_settings(update: LockSettingsUpdate) -> None:
     if not update:
         raise BadRequest("settings update must set at least one field")
@@ -757,3 +788,39 @@ async def async_clear_lock_schedule(
     await _request(
         session, "DELETE", host, port, token, f"/locks/{node_id}/users/{user_id}/schedules/{kind}/{slot_id}", secure=secure
     )
+
+
+# --- Lock enrollment (contracts/locks.md) -------------------------------------------------------------------------
+
+
+async def async_list_discoverable_locks(
+    session: aiohttp.ClientSession, host: str, port: int, token: str | None, *, secure: bool = False
+) -> list[AvailableLock]:
+    """`GET /locks/available` (administrators): Schlage locks paired to the controller but not enrolled.
+
+    Use it only to offer "add lock"; never create Home Assistant devices or entities from it. `GET /locks`, the
+    snapshot and `lock.changed` carry enrolled locks only. Unwrapped from `{ "locks": [...] }`.
+    """
+    body = await _request(session, "GET", host, port, token, "/locks/available", secure=secure)
+    return body["locks"]
+
+
+async def async_enroll_lock(
+    session: aiohttp.ClientSession, host: str, port: int, token: str | None, node_id: int, *, secure: bool = False
+) -> LockSummary:
+    """`PUT /locks/{nodeId}/enrollment` (administrators, idempotent): add a paired lock to the alarm system.
+
+    `404` (unknown node) -> `NotFound`; `409 lock_not_secure` (included without S0/S2) -> `LockNotSecure`;
+    `502 lock_unavailable` -> `LockUnavailable`. Returns the enrolled lock.
+    """
+    return await _request(session, "PUT", host, port, token, f"/locks/{node_id}/enrollment", secure=secure)
+
+
+async def async_unenroll_lock(
+    session: aiohttp.ClientSession, host: str, port: int, token: str | None, node_id: int, *, secure: bool = False
+) -> None:
+    """`DELETE /locks/{nodeId}/enrollment` (administrators, idempotent): remove the lock from the alarm system.
+
+    The lock stays paired; the stream sends `lock.removed`. `404` (unknown node) -> `NotFound`.
+    """
+    await _request(session, "DELETE", host, port, token, f"/locks/{node_id}/enrollment", secure=secure)

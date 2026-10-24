@@ -172,3 +172,23 @@ async def test_lock_messages_pass_through_including_unknown_fields() -> None:
         await server.close()
 
     assert events == messages
+
+
+async def test_lock_removed_passes_through() -> None:
+    messages = [SNAPSHOT, {"type": "lock.removed", "nodeId": 5}]
+
+    async def handler(request: web.Request) -> web.WebSocketResponse:
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        for message in messages:
+            await ws.send_json(message)
+        await ws.close()
+        return ws
+
+    server = await _serve(handler)
+    try:
+        events = await _collect(server)
+    finally:
+        await server.close()
+
+    assert events == messages
