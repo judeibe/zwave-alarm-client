@@ -28,13 +28,47 @@ Every call takes `(session, host, port, token, ...)`; `token` is optional: pass 
 | Events | `async_get_events` |
 | HA links | `async_create_ha_link`, `async_delete_ha_link` |
 | Keypads | `async_list_keypads`, `async_chime_keypad` |
+| Schlage locks | `async_list_locks`, `async_get_lock`, `async_refresh_lock`, `async_update_lock_settings`, `async_list_lock_users`, `async_set_lock_user_code`, `async_clear_lock_user_code`, `async_get_lock_schedule_slots`, `async_set_lock_schedules_enabled`, `async_get_lock_schedule`, `async_set_lock_schedule`, `async_clear_lock_schedule`; `validate_lock_code` (see below) |
 | Push channel | `async_stream_events` (sends keepalive pings, drops `pong`s; reconnect policy is the caller's) |
+
+### Schlage locks (BE469 / BE468)
+
+Follows the service's `contracts/locks.md`. Under `/api/v1`; `userId` is 1-30; no endpoint returns a stored code.
+
+| Call | Request |
+|---|---|
+| `async_list_locks` / `async_get_lock` | `GET /locks` (`{locks}`), `GET /locks/{nodeId}` |
+| `async_refresh_lock` | `POST /locks/{nodeId}/refresh`: re-read every parameter and the schedule slot counts |
+| `async_update_lock_settings` | `PATCH /locks/{nodeId}/settings`, any non-empty subset of `LockSettingsUpdate`, validated as a whole |
+| `async_list_lock_users` | `GET /locks/{nodeId}/users` (`{users: [{userId, status}]}`, status `enabled`/`disabled`/`available`) |
+| `async_set_lock_user_code` / `async_clear_lock_user_code` | `PUT` (`{code, status?}`) / `DELETE /locks/{nodeId}/users/{userId}/code` |
+| `async_get_lock_schedule_slots` | `GET /locks/{nodeId}/schedules` (`{slots}`) |
+| `async_set_lock_schedules_enabled` | `PUT /locks/{nodeId}/users/{userId}/schedules/enabled` with `{enabled}` |
+| `async_get_lock_schedule` / `async_set_lock_schedule` / `async_clear_lock_schedule` | `GET` / `PUT` / `DELETE /locks/{nodeId}/users/{userId}/schedules/{weekDay\|yearDay\|dailyRepeating}/{slotId}` |
+
+Create entities from a lock's `supportedSettings`. Any value in `settings` / `diagnostics` is `None` until the lock reports it; BE469-only settings are always `None` on a BE468 and writing one is a `BadRequest`. Failures to reach the lock (`502 lock_unavailable`) raise `LockUnavailable`, a `CannotConnect`.
+
+| Setting | Param | Notes |
+|---|---|---|
+| `beeper`, `vacationMode`, `lockAndLeave`, `autoLock` | 0x03, 0x04, 0x05, 0x0F | bool (wire 0x00 / 0xFF) |
+| `pinLength` | 0x10 | 4-8, default 4; does not rewrite existing codes |
+| `alarmMode` | 0x07 | `off`, `alert`, `tamper`, `forced_entry`; BE469 only |
+| `alertSensitivity`, `tamperSensitivity`, `kickSensitivity` | 0x08-0x0A | 0 (unsupported), 1 (most), 3 (medium), 5 (least); 2 and 4 undocumented; BE469 only |
+| `localControls` | 0x0B | `True` = local control enabled; BE469 only |
+
+Read-only `diagnostics`: `electronicTransitionCount` (0x0C), `mechanicalTransitionCount` (0x0D), `electronicFailedCount` (0x0E), `electronicHighPreloadTransitionCount` (0x11), `bootloaderVersion` (0x12), `userSlotBitField` (0x06, 4 bytes) and `occupiedUserSlots` (that field decoded to slots 1-30). `scheduleSlots` and `userSlotCount` give the per-user schedule slots per kind and the number of user slots.
+
+Schedules: weekdays are numbers 0 (Sunday) to 6 (Saturday); `yearDay` years are two digits (26 = 2026); `dailyRepeating` takes `weekdays`, a start and a duration.
+
+Codes must be 4-8 digits: `async_set_lock_user_code` and `validate_lock_code` raise `BadRequest` locally otherwise, and passing the lock's `settings["pinLength"]` as `pin_length=` requires that exact length. `async_update_lock_settings` checks `pinLength` (4-8) and sensitivities (0-5) before sending.
+
+The stream carries `lock.changed` (`{lock: LockSummary}`) and the snapshot gains `locks`; see `LockChanged`.
 
 Response shapes are available as `TypedDict`s in `zwave_alarm_client.models`.
 
 ## Errors
 
-All derive from `ZwaveAlarmError`: `CannotConnect` (unreachable, timeout, 5xx; `ServiceUnavailable` for 503), `InvalidAuth` (401), `Forbidden` (403), `NotFound` (404), `BadRequest` (400, message names the field), `Conflict` (409; `CommandRejected` for a lost arm/disarm race, `ZoneNotEmpty`, `ZoneInUse`, `CodeInUse`), `AccountLocked` (423), `TooManyRequests` (429, `.retry_after`).
+All derive from `ZwaveAlarmError`: `CannotConnect` (unreachable, timeout, 5xx; `ServiceUnavailable` for 503), `InvalidAuth` (401), `Forbidden` (403), `NotFound` (404), `BadRequest` (400, message names the field), `Conflict` (409; `CommandRejected` for a lost arm/disarm race, `ZoneNotEmpty`, `ZoneInUse`, `CodeInUse`), `AccountLocked` (423), `TooManyRequests` (429, `.retry_after`), `LockUnavailable` (502 `lock_unavailable`, a `CannotConnect`).
 
 ## Development
 
