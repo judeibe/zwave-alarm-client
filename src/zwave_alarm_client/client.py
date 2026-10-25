@@ -29,6 +29,7 @@ from .errors import (
     InvalidAuth,
     LockNotSecure,
     LockUnavailable,
+    NeedsBypass,
     NotFound,
     ScheduleKindUnsupported,
     ServiceUnavailable,
@@ -62,6 +63,7 @@ from .models import (
     ModeConfigUpdate,
     Panel,
     Placement,
+    Source,
     Role,
     SecurityEvent,
     SensorCategory,
@@ -89,13 +91,16 @@ def auth_headers(token: str | None) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"} if token else {}
 
 
-async def _error_body(response: aiohttp.ClientResponse) -> tuple[str, str]:
-    """`(code, message)` of the service's `{ "error": { code, message } }` body; `""` for either if absent."""
+async def _error_body(response: aiohttp.ClientResponse) -> tuple[str, str, dict[str, Any]]:
+    """`(code, message, error)` of the service's `{ "error": { code, message, ...extra } }` body.
+
+    `code` and `message` are `""` and `error` is `{}` if the body is absent or malformed.
+    """
     try:
         error = (await response.json(content_type=None))["error"]
-        return str(error.get("code", "")), str(error["message"])
+        return str(error.get("code", "")), str(error["message"]), dict(error)
     except (aiohttp.ClientError, ValueError, KeyError, TypeError, AttributeError):
-        return "", ""
+        return "", "", {}
 
 
 async def _request(
@@ -121,11 +126,12 @@ async def _request(
         ) as response:
             status = response.status
             if status >= 400:
-                code, message = await _error_body(response)
+                code, message, extra = await _error_body(response)
                 if status == 400:
                     if code == "schedule_kind_unsupported":
                         raise ScheduleKindUnsupported(message)
-                    raise BadRequest(message)
+                    sensor_ids = extra.get("sensorIds")
+                    raise BadRequest(message, sensor_ids if isinstance(sensor_ids, list) else None)
                 if status == 401:
                     raise InvalidAuth(message)
                 if status == 403:
@@ -133,6 +139,9 @@ async def _request(
                 if status == 404:
                     raise NotFound(message)
                 if status == 409:
+                    if code == "needs_bypass":
+                        faulted = extra.get("faulted")
+                        raise NeedsBypass(message, faulted if isinstance(faulted, list) else None)
                     if code == "zone_not_empty":
                         raise ZoneNotEmpty(message)
                     if code == "zone_in_use":
@@ -201,15 +210,33 @@ async def async_get_panel_state(
 
 
 async def async_arm(
-    session: aiohttp.ClientSession, host: str, port: int, token: str | None, mode: ArmMode, *, secure: bool = False
+    session: aiohttp.ClientSession,
+    host: str,
+    port: int,
+    token: str | None,
+    mode: ArmMode,
+    bypass: list[str] | None = None,
+    source: Source | None = None,
+    *,
+    secure: bool = False,
 ) -> Panel:
     """`POST /panel/arm` and return the new AlarmPanel state.
 
-    A `409` means a conflicting native-interface command won the race
-    (FR-014) and is `CommandRejected`.
+    `bypass` lists sensor ids to bypass for this arm session (max 256); `source` defaults to `app` on the
+    service. Open or offline intrusion sensors armed for `mode` that are not bypassed make the service answer
+    `409 needs_bypass` -> `NeedsBypass` (carrying `faulted`), with nothing changed; retry with their ids in
+    `bypass`. The `lock` and `schedule` sources bypass automatically. Arming succeeds even if every sensor is
+    bypassed. Unknown or non-intrusion ids in `bypass` are `BadRequest` (`sensor_ids`). Any other `409`
+    means the panel is not disarmed or a conflicting native-interface command won the race (FR-014) and is
+    `CommandRejected`.
     """
+    body: dict[str, Any] = {"mode": mode}
+    if bypass is not None:
+        body["bypass"] = list(bypass)
+    if source is not None:
+        body["source"] = source
     return await _request(
-        session, "POST", host, port, token, "/panel/arm", secure=secure, conflict=CommandRejected, json={"mode": mode}
+        session, "POST", host, port, token, "/panel/arm", secure=secure, conflict=CommandRejected, json=body
     )
 
 
