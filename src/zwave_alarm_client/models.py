@@ -17,6 +17,7 @@ SirenState = Literal["none", "sounding", "silenced", "timed_out", "stopped"]
 DispatchState = Literal["none", "held", "queued", "cancelled"]
 PanicType = Literal["PANIC", "FIRE", "MEDICAL", "SOS"]
 AlarmKind = Literal["SMOKE", "CO", "FLOOD_FREEZE"]  # life-safety sensors only
+SirenKind = Literal["BASE", "DOME", "OUTDOOR"]
 Placement = Literal["MAIN_DOOR", "SECONDARY_DOOR", "WINDOW", "ENTRYWAY", "ROOM", "GLASS_BREAK"]
 MODE_DELAY_RANGE = range(0, 181)  # whole seconds, per armed mode
 
@@ -34,6 +35,16 @@ class AlarmEvent(TypedDict):
     cancelledAt: int | None
     endedAt: int | None  # None while the event is open
     details: str | None
+
+
+class Siren(TypedDict):
+    """A Z-Wave siren node enrolled with the service (`GET /sirens`, `siren.changed`). `createdAt` is epoch ms."""
+
+    nodeId: int
+    kind: SirenKind
+    name: str
+    durationSec: int  # fixed at 600 for BASE and DOME; 60-600 (default 180) for OUTDOOR
+    createdAt: int
 
 
 class SilenceResult(TypedDict):
@@ -97,6 +108,7 @@ class Sensor(TypedDict):
     armedAway: bool
     alertsOnly: bool
     alarmKind: NotRequired[AlarmKind | None]  # None on intrusion sensors; absent before service 3.2
+    tampered: NotRequired[bool]  # cover removed; absent before service 3.3
     updatedAt: int
 
 

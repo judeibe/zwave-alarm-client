@@ -64,6 +64,8 @@ from .models import (
     PanicType,
     EmergencyService,
     SilenceResult,
+    Siren,
+    SirenKind,
     ModeConfig,
     ModeConfigUpdate,
     Panel,
@@ -313,6 +315,48 @@ async def async_get_alarm_events(
     return await _request(
         session, "GET", host, port, token, "/alarm-events", secure=secure, params=params or None
     )
+
+
+# --- Sirens -----------------------------------------------------------------
+
+
+async def async_get_sirens(
+    session: aiohttp.ClientSession, host: str, port: int, token: str | None, *, secure: bool = False
+) -> list[Siren]:
+    """`GET /sirens`: the Z-Wave sirens enrolled with the service (empty until one is enrolled)."""
+    return await _request(session, "GET", host, port, token, "/sirens", secure=secure)
+
+
+async def async_put_siren(
+    session: aiohttp.ClientSession,
+    host: str,
+    port: int,
+    token: str | None,
+    node_id: int,
+    kind: SirenKind,
+    name: str | None = None,
+    duration_sec: int | None = None,
+    *,
+    secure: bool = False,
+) -> Siren:
+    """`PUT /sirens/{nodeId}` (administrator only): enrol or update a siren and return it.
+
+    `duration_sec` (60-600) is allowed only for `OUTDOOR`; BASE and DOME are fixed at 600. A bad value or a
+    node zwave-js does not know is `BadRequest`; a driver that is not ready yet is `ServiceUnavailable`.
+    """
+    body: dict[str, Any] = {"kind": kind}
+    if name is not None:
+        body["name"] = name
+    if duration_sec is not None:
+        body["durationSec"] = duration_sec
+    return await _request(session, "PUT", host, port, token, f"/sirens/{node_id}", secure=secure, json=body)
+
+
+async def async_delete_siren(
+    session: aiohttp.ClientSession, host: str, port: int, token: str | None, node_id: int, *, secure: bool = False
+) -> None:
+    """`DELETE /sirens/{nodeId}` (administrator only); an unknown siren is `NotFound`."""
+    await _request(session, "DELETE", host, port, token, f"/sirens/{node_id}", secure=secure)
 
 
 # --- Zones & sensors --------------------------------------------------------
