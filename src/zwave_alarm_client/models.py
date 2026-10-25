@@ -18,6 +18,7 @@ DispatchState = Literal["none", "held", "queued", "cancelled"]
 PanicType = Literal["PANIC", "FIRE", "MEDICAL", "SOS"]
 AlarmKind = Literal["SMOKE", "CO", "FLOOD_FREEZE"]  # life-safety sensors only
 SirenKind = Literal["BASE", "DOME", "OUTDOOR"]
+Weekday = Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 Placement = Literal["MAIN_DOOR", "SECONDARY_DOOR", "WINDOW", "ENTRYWAY", "ROOM", "GLASS_BREAK"]
 MODE_DELAY_RANGE = range(0, 181)  # whole seconds, per armed mode
 
@@ -173,6 +174,20 @@ class UserUpdate(TypedDict, total=False):
     haUserId: str | None
     guestExpiresAt: str | int | None
     guestZoneId: str | None
+
+
+class GuestSchedule(TypedDict):
+    """When a guest's code works at the keypad (`/users/{userId}/schedules`); locks do not enforce it."""
+
+    id: str
+    userId: str
+    name: str
+    days: list[Weekday]
+    allDay: bool
+    start: str | None  # "HH:MM"; None when allDay. An end at or before start is an overnight window.
+    end: str | None
+    timeZone: str | None  # IANA name; None means the service's own zone
+    createdAt: int
 
 
 class LockoutPolicy(TypedDict):

@@ -53,7 +53,9 @@ from .models import (
     YearDaySchedule,
     ArmMode,
     DiscoverableSensor,
+    GuestSchedule,
     HaLink,
+    Weekday,
     KeypadSettings,
     KeypadSettingsUpdate,
     KeypadSummary,
@@ -658,6 +660,96 @@ async def async_clear_user_code(
     `409` -> `Conflict` for the last administrator.
     """
     await _request(session, "DELETE", host, port, token, f"/users/{user_id}/code", secure=secure)
+
+
+# --- Guest schedules --------------------------------------------------------
+
+_SCHEDULE_FIELDS = {"name": "name", "days": "days", "all_day": "allDay", "start": "start", "end": "end", "time_zone": "timeZone"}
+
+
+async def async_get_guest_schedules(
+    session: aiohttp.ClientSession, host: str, port: int, token: str | None, user_id: str, *, secure: bool = False
+) -> list[GuestSchedule]:
+    """`GET /users/{userId}/schedules` (administrator only). No schedule means unlimited keypad access.
+
+    The user must be a guest (`BadRequest` otherwise); an unknown user is `NotFound`.
+    """
+    return await _request(session, "GET", host, port, token, f"/users/{user_id}/schedules", secure=secure)
+
+
+async def async_create_guest_schedule(
+    session: aiohttp.ClientSession,
+    host: str,
+    port: int,
+    token: str | None,
+    user_id: str,
+    name: str,
+    days: list[Weekday],
+    all_day: bool = False,
+    start: str | None = None,
+    end: str | None = None,
+    time_zone: str | None = None,
+    *,
+    secure: bool = False,
+) -> GuestSchedule:
+    """`POST /users/{userId}/schedules` (administrator only) and return the schedule.
+
+    `days` has at least one weekday and no repeats. Unless `all_day`, both `start` and `end` (`"HH:MM"`) are
+    required and must differ; an `end` at or before `start` is an overnight window. `time_zone` is an IANA name
+    (default: the service's zone). Optional fields are sent only when given. A non-guest user or a bad body is
+    `BadRequest`.
+    """
+    body: dict[str, Any] = {"name": name, "days": list(days)}
+    if all_day:
+        body["allDay"] = True
+    if start is not None:
+        body["start"] = start
+    if end is not None:
+        body["end"] = end
+    if time_zone is not None:
+        body["timeZone"] = time_zone
+    return await _request(
+        session, "POST", host, port, token, f"/users/{user_id}/schedules", secure=secure, json=body
+    )
+
+
+async def async_update_guest_schedule(
+    session: aiohttp.ClientSession,
+    host: str,
+    port: int,
+    token: str | None,
+    user_id: str,
+    schedule_id: str,
+    *,
+    secure: bool = False,
+    **fields: Any,
+) -> GuestSchedule:
+    """`PATCH /users/{userId}/schedules/{scheduleId}` (administrator only) with any of `name`, `days`, `all_day`,
+    `start`, `end`, `time_zone`; `None` clears `start`, `end` or `time_zone`.
+
+    The service re-checks the merged schedule, so `all_day=False` on an all-day schedule without `start` and
+    `end` is `BadRequest`. An unknown schedule is `NotFound`; an unknown field name is a `TypeError`.
+    """
+    if unknown := set(fields) - set(_SCHEDULE_FIELDS):
+        raise TypeError(f"unexpected schedule field(s): {', '.join(sorted(unknown))}")
+    body = {_SCHEDULE_FIELDS[key]: value for key, value in fields.items()}
+    return await _request(
+        session, "PATCH", host, port, token, f"/users/{user_id}/schedules/{schedule_id}", secure=secure, json=body
+    )
+
+
+async def async_delete_guest_schedule(
+    session: aiohttp.ClientSession,
+    host: str,
+    port: int,
+    token: str | None,
+    user_id: str,
+    schedule_id: str,
+    *,
+    secure: bool = False,
+) -> None:
+    """`DELETE /users/{userId}/schedules/{scheduleId}` (administrator only); an unknown schedule is `NotFound`."""
+    await _request(session, "DELETE", host, port, token, f"/users/{user_id}/schedules/{schedule_id}", secure=secure)
 
 
 # --- Lockout policy ---------------------------------------------------------
