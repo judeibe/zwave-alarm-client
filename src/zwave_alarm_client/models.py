@@ -19,6 +19,15 @@ PanicType = Literal["PANIC", "FIRE", "MEDICAL", "SOS"]
 AlarmKind = Literal["SMOKE", "CO", "FLOOD_FREEZE"]  # life-safety sensors only
 SirenKind = Literal["BASE", "DOME", "OUTDOOR"]
 Weekday = Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+SecurityEventType = Literal[
+    "armed", "disarmed", "breach", "alarm_triggered", "alarm_cleared", "device_fault", "lockout", "guest_code_used",
+    "bypassed", "tamper", "tamper_cleared", "siren_silenced",
+    "code_added", "code_changed", "code_removed", "duress_code_set", "duress_code_removed",
+    "guest_schedule_added", "guest_schedule_updated", "guest_schedule_removed",
+    "mode_schedule_added", "mode_schedule_updated", "mode_schedule_removed",
+    "mode_schedule_applied", "mode_schedule_skipped",
+]  # lock and keypad kinds arrive with service phase 6
+ModeScheduleMode = Literal["disarmed", "armed_home", "armed_away"]
 Placement = Literal["MAIN_DOOR", "SECONDARY_DOOR", "WINDOW", "ENTRYWAY", "ROOM", "GLASS_BREAK"]
 MODE_DELAY_RANGE = range(0, 181)  # whole seconds, per armed mode
 
@@ -190,6 +199,20 @@ class GuestSchedule(TypedDict):
     createdAt: int
 
 
+class ModeSchedule(TypedDict):
+    """A scheduled mode change (`/mode-schedules`); the service applies it with source `schedule`."""
+
+    id: str
+    name: str
+    mode: ModeScheduleMode
+    time: str  # "HH:MM", 24 h, in timeZone
+    days: list[Weekday]
+    enabled: bool
+    timeZone: str | None  # IANA name; None means the service's own zone
+    createdAt: int
+    lastRunAt: int | None
+
+
 class LockoutPolicy(TypedDict):
     failedAttemptThreshold: int
     cooldownSeconds: int
@@ -211,6 +234,10 @@ class SecurityEvent(TypedDict):
     relatedSensorId: str | None
     details: str | None
     occurredAt: int
+    # Absent before service 3.6. `type` is a SecurityEventType today but stays `str` so newer kinds still parse.
+    actor: NotRequired[str | None]
+    deviceId: NotRequired[str | None]
+    deviceName: NotRequired[str | None]
 
 
 class HaLink(TypedDict):

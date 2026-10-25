@@ -65,6 +65,14 @@ class LockNotSecure(Conflict):
     """Enrolling a lock included without S0/S2 (409 `lock_not_secure`): exclude it and include it again securely."""
 
 
+class ScheduleConflict(Conflict):
+    """The mode schedule clashes with another enabled one (409 `schedule_conflict`); `conflicts_with` is its id."""
+
+    def __init__(self, message: str = "", conflicts_with: str | None = None) -> None:
+        super().__init__(message)
+        self.conflicts_with = conflicts_with
+
+
 class NeedsBypass(Conflict):
     """Arming was refused (409 `needs_bypass`): faulted sensors must be bypassed first.
 
