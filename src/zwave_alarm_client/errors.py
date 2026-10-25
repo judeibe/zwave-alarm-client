@@ -57,6 +57,10 @@ class CodeInUse(Conflict):
     """Another user already has this code (409 `code_in_use`); codes must be unique because login identifies by code."""
 
 
+class CodeLimit(Conflict):
+    """The location already holds the maximum of 256 codes, duress codes included (409 `code_limit`)."""
+
+
 class LockNotSecure(Conflict):
     """Enrolling a lock included without S0/S2 (409 `lock_not_secure`): exclude it and include it again securely."""
 
@@ -93,7 +97,7 @@ class ScheduleKindUnsupported(BadRequest):
 
 
 class TooManyRequests(ZwaveAlarmError):
-    """Login is rate-limited per client IP (429); `retry_after` is the `Retry-After` header in seconds, if sent."""
+    """Login or disarm is rate-limited per client IP (429 `too_many_requests`); `retry_after` is the `Retry-After` header in seconds, if sent."""
 
     def __init__(self, message: str = "", retry_after: float | None = None) -> None:
         super().__init__(message)
