@@ -27,6 +27,7 @@ Every call takes `(session, host, port, token, ...)`; `token` is optional: pass 
 | Lockout policy | `async_get_lockout_policy`, `async_update_lockout_policy` |
 | Modes | `async_get_modes`, `async_update_modes` (per-mode entry/exit delay, 0-180 s, default 60 s; administrator to change) |
 | Alarm events | `async_panic(type, service=)` (PANIC, FIRE, MEDICAL, SOS), `async_silence`, `async_get_alarm_events(active=, limit=)`; `alarm.event` stream message |
+| Sirens | `async_get_sirens`, `async_put_siren(node_id, kind, name=, duration_sec=)` (OUTDOOR 60-600 s, others fixed 600 s), `async_delete_siren`; `siren.changed` / `siren.removed` stream messages |
 | Events | `async_get_events` |
 | HA links | `async_create_ha_link`, `async_delete_ha_link` |
 | Keypads | `async_list_keypads`, `async_chime_keypad`, `async_get_keypad_settings`, `async_update_keypad_settings` (`requireCodeToArm`; administrator to change) |
