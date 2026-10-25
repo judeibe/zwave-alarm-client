@@ -26,6 +26,7 @@ Every call takes `(session, host, port, token, ...)`; `token` is optional: pass 
 | Codes (write-only) | `async_set_user_code`, `async_clear_user_code`; users expose only `hasCode` |
 | Lockout policy | `async_get_lockout_policy`, `async_update_lockout_policy` |
 | Modes | `async_get_modes`, `async_update_modes` (per-mode entry/exit delay, 0-180 s, default 60 s; administrator to change) |
+| Alarm events | `async_panic(type, service=)` (PANIC, FIRE, MEDICAL, SOS), `async_silence`, `async_get_alarm_events(active=, limit=)`; `alarm.event` stream message |
 | Events | `async_get_events` |
 | HA links | `async_create_ha_link`, `async_delete_ha_link` |
 | Keypads | `async_list_keypads`, `async_chime_keypad`, `async_get_keypad_settings`, `async_update_keypad_settings` (`requireCodeToArm`; administrator to change) |
