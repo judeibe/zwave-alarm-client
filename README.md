@@ -20,7 +20,7 @@ Every call takes `(session, host, port, token, ...)`; `token` is optional: pass 
 | Area | Calls |
 |---|---|
 | Auth | `async_login`, `async_logout` |
-| Panel | `async_get_panel_state`, `async_validate_connection`, `async_arm`, `async_disarm` (zone-restricted guests return a panel with `disarmedZoneIds`) |
+| Panel | `async_get_panel_state`, `async_validate_connection`, `async_arm` (`bypass=`, `source=`; `NeedsBypass` carries `faulted`), `async_disarm` (zone-restricted guests return a panel with `disarmedZoneIds`) |
 | Zones & sensors | `async_get_zones`, `async_create_zone`, `async_update_zone`, `async_delete_zone` (`force=`), `async_list_discoverable_sensors`, `async_assign_sensor`, `async_update_sensor` (also `placement`, `alertsOnly`, `armed={home, away}`), `async_unassign_sensor` |
 | Users | `async_list_users` (`ha_person_id=` filter), `async_create_user` (`code` optional; guest expiry / `guest_zone_id`, `ha_person_id`, `ha_user_id`), `async_update_user`, `async_delete_user` |
 | Codes (write-only) | `async_set_user_code`, `async_clear_user_code`; users expose only `hasCode` |
@@ -31,6 +31,19 @@ Every call takes `(session, host, port, token, ...)`; `token` is optional: pass 
 | Keypads | `async_list_keypads`, `async_chime_keypad`, `async_get_keypad_settings`, `async_update_keypad_settings` (`requireCodeToArm`; administrator to change) |
 | Schlage locks | `async_list_locks`, `async_get_lock`, `async_refresh_lock`, `async_update_lock_settings`, `async_list_lock_users`, `async_set_lock_user_code`, `async_clear_lock_user_code`, `async_get_lock_schedule_slots`, `async_set_lock_schedules_enabled`, `async_get_lock_schedule`, `async_set_lock_schedule`, `async_clear_lock_schedule`, `async_list_discoverable_locks`, `async_enroll_lock`, `async_unenroll_lock`, `async_set_locked`; `lock_capabilities`, `lock_supports_schedule`, `validate_lock_code` (see below) |
 | Push channel | `async_stream_events` (sends keepalive pings, drops `pong`s; reconnect policy is the caller's) |
+
+### Arming with faulted sensors
+
+An open or offline intrusion sensor armed for the target mode makes `async_arm` raise `NeedsBypass` (service `409 needs_bypass`); nothing changed. Confirm by retrying with their ids:
+
+```python
+try:
+    await async_arm(session, host, port, token, "armed_away", source="app")
+except NeedsBypass as err:
+    await async_arm(session, host, port, token, "armed_away", [f["sensorId"] for f in err.faulted], "app")
+```
+
+`source` is `app`, `keypad`, `lock`, `schedule` or `alexa`; `lock` and `schedule` bypass automatically. `Panel` gains `bypassedDeviceIds`, `exitEndsAt` and `entryEndsAt` (all optional against older services).
 
 ### Schlage locks (BE469 / BE468)
 

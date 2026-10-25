@@ -8,8 +8,20 @@ PanelMode = Literal["disarmed", "arming", "armed_away", "armed_home", "alarm_pen
 ArmMode = Literal["armed_away", "armed_home"]
 Role = Literal["administrator", "member", "guest"]
 SensorCategory = Literal["intrusion", "life-safety"]
+Source = Literal["app", "keypad", "lock", "schedule", "alexa"]
+# The service reserves "tampered", "not_set_up" and "updating" for later; accept them already.
+FaultedReason = Literal["open", "offline", "tampered", "not_set_up", "updating"]
 Placement = Literal["MAIN_DOOR", "SECONDARY_DOOR", "WINDOW", "ENTRYWAY", "ROOM", "GLASS_BREAK"]
 MODE_DELAY_RANGE = range(0, 181)  # whole seconds, per armed mode
+
+
+class FaultedSensor(TypedDict):
+    """One entry of `NeedsBypass.faulted`."""
+
+    sensorId: str
+    name: str
+    zoneId: str
+    reason: FaultedReason
 
 
 class ModeDelays(TypedDict):
@@ -40,6 +52,9 @@ class Panel(TypedDict):
     triggeredBy: str | None
     armedMode: ArmMode | None
     disarmedZoneIds: list[str]
+    exitEndsAt: NotRequired[int | None]  # epoch ms while `arming`; absent before service 3.1
+    entryEndsAt: NotRequired[int | None]  # epoch ms while `alarm_pending`
+    bypassedDeviceIds: NotRequired[list[str]]  # sensors bypassed for the current arm session
     modes: NotRequired[ModeConfig]  # on `GET /panel`, `panel.changed` and the snapshot; absent before service 3.0
 
 

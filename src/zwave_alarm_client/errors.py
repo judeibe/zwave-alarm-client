@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .models import FaultedSensor
+
 
 class ZwaveAlarmError(Exception):
     """Base class for every error this package raises."""
@@ -59,12 +61,31 @@ class LockNotSecure(Conflict):
     """Enrolling a lock included without S0/S2 (409 `lock_not_secure`): exclude it and include it again securely."""
 
 
+class NeedsBypass(Conflict):
+    """Arming was refused (409 `needs_bypass`): faulted sensors must be bypassed first.
+
+    `faulted` lists each sensor (`sensorId`, `name`, `zoneId`, `reason`); retry the same arm with
+    `bypass=[f["sensorId"] for f in err.faulted]` to confirm. Nothing changed on the service.
+    """
+
+    def __init__(self, message: str = "", faulted: list[FaultedSensor] | None = None) -> None:
+        super().__init__(message)
+        self.faulted: list[FaultedSensor] = faulted or []
+
+
 class CommandRejected(Conflict):
     """A conflicting concurrent arm/disarm won the race (409, FR-014)."""
 
 
 class BadRequest(ZwaveAlarmError):
-    """The request failed schema validation (400); `str(err)` names the offending field."""
+    """The request failed schema validation (400); `str(err)` names the offending field.
+
+    `sensor_ids` holds the ids the service rejected when `bypass` named unknown or non-intrusion sensors.
+    """
+
+    def __init__(self, message: str = "", sensor_ids: list[str] | None = None) -> None:
+        super().__init__(message)
+        self.sensor_ids: list[str] = sensor_ids or []
 
 
 class ScheduleKindUnsupported(BadRequest):
