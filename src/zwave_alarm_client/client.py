@@ -23,6 +23,7 @@ from .errors import (
     BadRequest,
     CannotConnect,
     CodeInUse,
+    CodeLimit,
     CommandRejected,
     Conflict,
     Forbidden,
@@ -155,6 +156,8 @@ async def _request(
                         raise ZoneInUse(message)
                     if code == "code_in_use":
                         raise CodeInUse(message)
+                    if code == "code_limit":
+                        raise CodeLimit(message)
                     if code == "lock_not_secure":
                         raise LockNotSecure(message)
                     raise conflict(message)
@@ -537,6 +540,7 @@ async def async_create_user(
     role: Role,
     code: str | None = None,
     *,
+    confirm_code: str | None = None,
     guest_expires_at: str | int | None = None,
     guest_zone_id: str | None = None,
     ha_person_id: str | None = None,
@@ -550,12 +554,19 @@ async def async_create_user(
     `ha_person_id` / `ha_user_id` link the user to a Home Assistant person / user (display and linking only);
     a `ha_person_id` already linked to another user is a `409` -> `Conflict`.
 
+    New codes must be exactly four digits (`BadRequest` otherwise) and unique: `409 code_in_use` ->
+    `CodeInUse`, and the 257th code in the location is `409 code_limit` -> `CodeLimit`. `confirm_code`, the spec's
+    second entry, must equal `code` if sent; it is never stored. An `installer` gets `guestExpiresAt` set by the
+    service to 48 h from creation.
+
     A guest needs `guest_expires_at` (ISO date string or epoch ms) and/or
     `guest_zone_id`; a zone-restricted guest disarms only that zone (FR-010a).
     """
     body: dict[str, Any] = {"name": name, "role": role}
     if code is not None:
         body["code"] = code
+    if confirm_code is not None:
+        body["confirmCode"] = confirm_code
     if guest_expires_at is not None:
         body["guestExpiresAt"] = guest_expires_at
     if guest_zone_id is not None:
@@ -592,13 +603,51 @@ async def async_update_user(
 
 
 async def async_set_user_code(
-    session: aiohttp.ClientSession, host: str, port: int, token: str | None, user_id: str, code: str, *, secure: bool = False
+    session: aiohttp.ClientSession,
+    host: str,
+    port: int,
+    token: str | None,
+    user_id: str,
+    code: str,
+    confirm_code: str | None = None,
+    *,
+    secure: bool = False,
 ) -> None:
-    """`PUT /users/{userId}/code` (administrator only): set or replace the code (4-12 digits, write-only).
+    """`PUT /users/{userId}/code` (administrator only): set or replace the code (exactly 4 digits, write-only).
 
-    Resets the user's failed attempts and lockout. `409 code_in_use` -> `CodeInUse`.
+    Resets the user's failed attempts and lockout. `409 code_in_use` -> `CodeInUse`; `409 code_limit` ->
+    `CodeLimit`. `confirm_code` must equal `code` if sent; a mismatch or a non-4-digit code is `BadRequest`.
     """
-    await _request(session, "PUT", host, port, token, f"/users/{user_id}/code", secure=secure, json={"code": code})
+    body = {"code": code, **({"confirmCode": confirm_code} if confirm_code is not None else {})}
+    await _request(session, "PUT", host, port, token, f"/users/{user_id}/code", secure=secure, json=body)
+
+
+async def async_set_duress_code(
+    session: aiohttp.ClientSession,
+    host: str,
+    port: int,
+    token: str | None,
+    user_id: str,
+    code: str,
+    confirm_code: str | None = None,
+    *,
+    secure: bool = False,
+) -> None:
+    """`PUT /users/{userId}/duress-code` (administrator only): set the owner's duress code.
+
+    Entering it on a disarm disarms normally but quietly raises a DURESS alarm event. The target must be an
+    administrator (`BadRequest` otherwise). Same code rules and errors as `async_set_user_code`; a duress code
+    also counts toward the 256-code cap and may not equal another user's code or the user's own.
+    """
+    body = {"code": code, **({"confirmCode": confirm_code} if confirm_code is not None else {})}
+    await _request(session, "PUT", host, port, token, f"/users/{user_id}/duress-code", secure=secure, json=body)
+
+
+async def async_delete_duress_code(
+    session: aiohttp.ClientSession, host: str, port: int, token: str | None, user_id: str, *, secure: bool = False
+) -> None:
+    """`DELETE /users/{userId}/duress-code` (administrator only)."""
+    await _request(session, "DELETE", host, port, token, f"/users/{user_id}/duress-code", secure=secure)
 
 
 async def async_clear_user_code(

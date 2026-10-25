@@ -6,7 +6,7 @@ from typing import Literal, NotRequired, TypedDict
 
 PanelMode = Literal["disarmed", "arming", "armed_away", "armed_home", "alarm_pending", "alarm_triggered"]
 ArmMode = Literal["armed_away", "armed_home"]
-Role = Literal["administrator", "member", "guest"]
+Role = Literal["administrator", "member", "guest", "installer"]  # installer access expires after 48 h
 SensorCategory = Literal["intrusion", "life-safety"]
 Source = Literal["app", "keypad", "lock", "schedule", "alexa"]
 # The service reserves "tampered", "not_set_up" and "updating" for later; accept them already.
@@ -161,6 +161,7 @@ class User(TypedDict):
     createdAt: int
     # Config-panel contract fields; absent on older services. A code is never returned, only whether one is set.
     hasCode: NotRequired[bool]
+    hasDuressCode: NotRequired[bool]  # only an administrator can have one; absent before service 3.4
     haPersonId: NotRequired[str | None]
     haUserId: NotRequired[str | None]
 

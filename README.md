@@ -23,7 +23,7 @@ Every call takes `(session, host, port, token, ...)`; `token` is optional: pass 
 | Panel | `async_get_panel_state`, `async_validate_connection`, `async_arm` (`bypass=`, `source=`; `NeedsBypass` carries `faulted`), `async_disarm` (zone-restricted guests return a panel with `disarmedZoneIds`) |
 | Zones & sensors | `async_get_zones`, `async_create_zone`, `async_update_zone`, `async_delete_zone` (`force=`), `async_list_discoverable_sensors`, `async_assign_sensor`, `async_update_sensor` (also `placement`, `alertsOnly`, `armed={home, away}`), `async_unassign_sensor` |
 | Users | `async_list_users` (`ha_person_id=` filter), `async_create_user` (`code` optional; guest expiry / `guest_zone_id`, `ha_person_id`, `ha_user_id`), `async_update_user`, `async_delete_user` |
-| Codes (write-only) | `async_set_user_code`, `async_clear_user_code`; users expose only `hasCode` |
+| Codes (write-only) | `async_set_user_code(confirm_code=)`, `async_clear_user_code`, `async_set_duress_code`, `async_delete_duress_code`; users expose only `hasCode` and `hasDuressCode`. Codes are exactly 4 digits and unique (`CodeInUse`), at most 256 per location (`CodeLimit`). Role `installer` expires 48 h after creation. |
 | Lockout policy | `async_get_lockout_policy`, `async_update_lockout_policy` |
 | Modes | `async_get_modes`, `async_update_modes` (per-mode entry/exit delay, 0-180 s, default 60 s; administrator to change) |
 | Alarm events | `async_panic(type, service=)` (PANIC, FIRE, MEDICAL, SOS), `async_silence`, `async_get_alarm_events(active=, limit=)`; `alarm.event` stream message |
