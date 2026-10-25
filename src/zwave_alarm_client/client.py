@@ -32,6 +32,7 @@ from .errors import (
     LockUnavailable,
     NeedsBypass,
     NotFound,
+    ScheduleConflict,
     ScheduleKindUnsupported,
     ServiceUnavailable,
     TooManyRequests,
@@ -55,6 +56,9 @@ from .models import (
     DiscoverableSensor,
     GuestSchedule,
     HaLink,
+    ModeSchedule,
+    ModeScheduleMode,
+    SecurityEventType,
     Weekday,
     KeypadSettings,
     KeypadSettingsUpdate,
@@ -152,6 +156,9 @@ async def _request(
                     if code == "needs_bypass":
                         faulted = extra.get("faulted")
                         raise NeedsBypass(message, faulted if isinstance(faulted, list) else None)
+                    if code == "schedule_conflict":
+                        other = extra.get("conflictsWith")
+                        raise ScheduleConflict(message, other if isinstance(other, str) else None)
                     if code == "zone_not_empty":
                         raise ZoneNotEmpty(message)
                     if code == "zone_in_use":
@@ -785,12 +792,100 @@ async def async_get_events(
     token: str | None,
     *,
     since: int | None = None,
+    until: int | None = None,
     limit: int | None = None,
+    type: SecurityEventType | str | list[str] | None = None,  # noqa: A002 - mirrors the query parameter
+    device_id: str | None = None,
+    user_id: str | None = None,
+    before: str | None = None,
     secure: bool = False,
 ) -> list[SecurityEvent]:
-    """`GET /events`: security event history, newest first (FR-011)."""
-    params = {key: value for key, value in (("since", since), ("limit", limit)) if value is not None}
+    """`GET /events`: security event history, newest first (FR-011).
+
+    Filters (all optional, sent only when given): `type` is one event type or a list of them (an unknown type
+    is `BadRequest`); `device_id`; `user_id` (matches the event's `sourceUserId`); `since` (inclusive) and
+    `until` (exclusive) in epoch ms; `before` is an event id to page from (an unknown id returns `[]`);
+    `limit` is 1-500 (0 or more than 500 is `BadRequest`).
+    """
+    if isinstance(type, list):
+        type = ",".join(type)
+    candidates = (
+        ("since", since), ("until", until), ("limit", limit), ("type", type),
+        ("deviceId", device_id), ("userId", user_id), ("before", before),
+    )
+    params = {key: value for key, value in candidates if value is not None}
     return await _request(session, "GET", host, port, token, "/events", secure=secure, params=params)
+
+
+# --- Mode schedules ---------------------------------------------------------
+
+_MODE_SCHEDULE_FIELDS = {
+    "name": "name", "mode": "mode", "time": "time", "days": "days", "enabled": "enabled", "time_zone": "timeZone",
+}
+
+
+async def async_get_mode_schedules(
+    session: aiohttp.ClientSession, host: str, port: int, token: str | None, *, secure: bool = False
+) -> list[ModeSchedule]:
+    """`GET /mode-schedules`."""
+    return await _request(session, "GET", host, port, token, "/mode-schedules", secure=secure)
+
+
+async def async_create_mode_schedule(
+    session: aiohttp.ClientSession,
+    host: str,
+    port: int,
+    token: str | None,
+    name: str,
+    mode: ModeScheduleMode,
+    time: str,
+    days: list[Weekday],
+    enabled: bool | None = None,
+    time_zone: str | None = None,
+    *,
+    secure: bool = False,
+) -> ModeSchedule:
+    """`POST /mode-schedules` (administrator only) and return the schedule.
+
+    `time` is `"HH:MM"` (24 h) in `time_zone` (an IANA name; default the service's zone); `days` is at least
+    one weekday. `enabled` and `time_zone` are sent only when given. A clash with another enabled schedule is
+    `409 schedule_conflict` -> `ScheduleConflict` (`conflicts_with`); a bad body is `BadRequest`.
+    """
+    body: dict[str, Any] = {"name": name, "mode": mode, "time": time, "days": list(days)}
+    if enabled is not None:
+        body["enabled"] = enabled
+    if time_zone is not None:
+        body["timeZone"] = time_zone
+    return await _request(session, "POST", host, port, token, "/mode-schedules", secure=secure, json=body)
+
+
+async def async_update_mode_schedule(
+    session: aiohttp.ClientSession,
+    host: str,
+    port: int,
+    token: str | None,
+    schedule_id: str,
+    *,
+    secure: bool = False,
+    **fields: Any,
+) -> ModeSchedule:
+    """`PATCH /mode-schedules/{id}` (administrator only) with any of `name`, `mode`, `time`, `days`, `enabled`,
+    `time_zone` (`None` clears the time zone). Errors as for create; an unknown id is `NotFound`; an unknown
+    field name is a `TypeError`.
+    """
+    if unknown := set(fields) - set(_MODE_SCHEDULE_FIELDS):
+        raise TypeError(f"unexpected mode schedule field(s): {', '.join(sorted(unknown))}")
+    body = {_MODE_SCHEDULE_FIELDS[key]: value for key, value in fields.items()}
+    return await _request(
+        session, "PATCH", host, port, token, f"/mode-schedules/{schedule_id}", secure=secure, json=body
+    )
+
+
+async def async_delete_mode_schedule(
+    session: aiohttp.ClientSession, host: str, port: int, token: str | None, schedule_id: str, *, secure: bool = False
+) -> None:
+    """`DELETE /mode-schedules/{id}` (administrator only); an unknown id is `NotFound`."""
+    await _request(session, "DELETE", host, port, token, f"/mode-schedules/{schedule_id}", secure=secure)
 
 
 # --- Home Assistant links ---------------------------------------------------
