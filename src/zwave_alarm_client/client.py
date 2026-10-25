@@ -57,7 +57,11 @@ from .models import (
     KeypadSummary,
     LockoutPolicy,
     LockoutPolicyUpdate,
+    ArmedFlags,
+    ModeConfig,
+    ModeConfigUpdate,
     Panel,
+    Placement,
     Role,
     SecurityEvent,
     SensorCategory,
@@ -252,10 +256,15 @@ async def async_assign_sensor(
     name: str,
     category: SensorCategory,
     *,
+    placement: Placement | None = None,
+    armed: ArmedFlags | None = None,
+    alerts_only: bool | None = None,
     secure: bool = False,
 ) -> dict[str, Any]:
     """`POST /zones/{zoneId}/sensors` (administrator only): assign an existing zwave-js node to a zone.
 
+    `placement`, `armed` (`{"home": bool, "away": bool}`) and `alerts_only` are sent only when given; the
+    service defaults intrusion sensors to `MAIN_DOOR` armed per the spec (motion armed away only).
     `404` (unknown zone or node) -> `NotFound`; `409` (node already assigned) -> `Conflict`.
     """
     return await _request(
@@ -266,7 +275,14 @@ async def async_assign_sensor(
         token,
         f"/zones/{zone_id}/sensors",
         secure=secure,
-        json={"zwaveNodeId": zwave_node_id, "name": name, "category": category},
+        json={
+            "zwaveNodeId": zwave_node_id,
+            "name": name,
+            "category": category,
+            **({"placement": placement} if placement is not None else {}),
+            **({"armed": dict(armed)} if armed is not None else {}),
+            **({"alertsOnly": alerts_only} if alerts_only is not None else {}),
+        },
     )
 
 
@@ -320,7 +336,11 @@ async def async_update_sensor(
     *,
     secure: bool = False,
 ) -> dict[str, Any]:
-    """`PATCH /sensors/{sensorId}` (administrator only): rename, recategorise or move to another `zoneId`."""
+    """`PATCH /sensors/{sensorId}` (administrator only): rename, recategorise, move to another `zoneId`, or set
+    `placement`, `alertsOnly` and per-mode `armed` (`{"home": bool, "away": bool}`; either key alone is fine).
+
+    `400` (empty body, bad value, or `placement` on a life-safety sensor) -> `BadRequest`; `404` -> `NotFound`.
+    The returned sensor carries the flat `armedHome` / `armedAway` fields."""
     return await _request(
         session, "PATCH", host, port, token, f"/sensors/{sensor_id}", secure=secure, json=dict(update)
     )
@@ -331,6 +351,32 @@ async def async_unassign_sensor(
 ) -> None:
     """`DELETE /sensors/{sensorId}` (administrator only): unassign it; the zwave-js node itself is kept."""
     await _request(session, "DELETE", host, port, token, f"/sensors/{sensor_id}", secure=secure)
+
+
+# --- Modes ------------------------------------------------------------------
+
+
+async def async_get_modes(
+    session: aiohttp.ClientSession, host: str, port: int, token: str | None, *, secure: bool = False
+) -> ModeConfig:
+    """`GET /modes`: entry and exit delay (whole seconds, 0-180, default 60) for `armed_home` and `armed_away`."""
+    return await _request(session, "GET", host, port, token, "/modes", secure=secure)
+
+
+async def async_update_modes(
+    session: aiohttp.ClientSession,
+    host: str,
+    port: int,
+    token: str | None,
+    update: ModeConfigUpdate,
+    *,
+    secure: bool = False,
+) -> ModeConfig:
+    """`PATCH /modes` (administrator only) with a partial per-mode change; returns the full config.
+
+    A delay outside 0-180 or an empty body is `400` -> `BadRequest`; a non-administrator gets `Forbidden`.
+    """
+    return await _request(session, "PATCH", host, port, token, "/modes", secure=secure, json=dict(update))
 
 
 # --- Users ------------------------------------------------------------------

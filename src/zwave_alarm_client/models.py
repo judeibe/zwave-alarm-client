@@ -8,6 +8,30 @@ PanelMode = Literal["disarmed", "arming", "armed_away", "armed_home", "alarm_pen
 ArmMode = Literal["armed_away", "armed_home"]
 Role = Literal["administrator", "member", "guest"]
 SensorCategory = Literal["intrusion", "life-safety"]
+Placement = Literal["MAIN_DOOR", "SECONDARY_DOOR", "WINDOW", "ENTRYWAY", "ROOM", "GLASS_BREAK"]
+MODE_DELAY_RANGE = range(0, 181)  # whole seconds, per armed mode
+
+
+class ModeDelays(TypedDict):
+    entryDelaySec: int
+    exitDelaySec: int
+
+
+class ModeConfig(TypedDict):
+    """`GET /modes`: entry and exit delay for each armed mode."""
+
+    armed_home: ModeDelays
+    armed_away: ModeDelays
+
+
+class ModeDelaysUpdate(TypedDict, total=False):
+    entryDelaySec: int
+    exitDelaySec: int
+
+
+class ModeConfigUpdate(TypedDict, total=False):
+    armed_home: ModeDelaysUpdate
+    armed_away: ModeDelaysUpdate
 
 
 class Panel(TypedDict):
@@ -16,6 +40,7 @@ class Panel(TypedDict):
     triggeredBy: str | None
     armedMode: ArmMode | None
     disarmedZoneIds: list[str]
+    modes: NotRequired[ModeConfig]  # on `GET /panel`, `panel.changed` and the snapshot; absent before service 3.0
 
 
 class Sensor(TypedDict):
@@ -27,7 +52,16 @@ class Sensor(TypedDict):
     currentState: Literal["normal", "breached"]
     batteryLevel: int | None
     connectivityStatus: Literal["online", "offline"]
+    placement: Placement | None  # None for life-safety sensors
+    armedHome: bool
+    armedAway: bool
+    alertsOnly: bool
     updatedAt: int
+
+
+class ArmedFlags(TypedDict, total=False):
+    home: bool
+    away: bool
 
 
 class Zone(TypedDict):
@@ -46,6 +80,9 @@ class SensorUpdate(TypedDict, total=False):
     name: str
     category: SensorCategory
     zoneId: str
+    placement: Placement
+    alertsOnly: bool
+    armed: ArmedFlags
 
 
 class DiscoverableSensor(TypedDict):
