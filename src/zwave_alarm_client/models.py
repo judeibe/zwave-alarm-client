@@ -11,8 +11,33 @@ SensorCategory = Literal["intrusion", "life-safety"]
 Source = Literal["app", "keypad", "lock", "schedule", "alexa"]
 # The service reserves "tampered", "not_set_up" and "updating" for later; accept them already.
 FaultedReason = Literal["open", "offline", "tampered", "not_set_up", "updating"]
+AlarmEventType = Literal["BURGLARY", "SMOKE", "CO", "PANIC", "FIRE_MEDICAL", "DURESS", "SOS", "FLOOD_FREEZE"]
+EmergencyService = Literal["police", "fire", "medical"]
+SirenState = Literal["none", "sounding", "silenced", "timed_out", "stopped"]
+DispatchState = Literal["none", "held", "queued", "cancelled"]
+PanicType = Literal["PANIC", "FIRE", "MEDICAL", "SOS"]
+AlarmKind = Literal["SMOKE", "CO", "FLOOD_FREEZE"]  # life-safety sensors only
 Placement = Literal["MAIN_DOOR", "SECONDARY_DOOR", "WINDOW", "ENTRYWAY", "ROOM", "GLASS_BREAK"]
 MODE_DELAY_RANGE = range(0, 181)  # whole seconds, per armed mode
+
+
+class AlarmEvent(TypedDict):
+    """An alarm event (`POST /panel/panic`, `GET /alarm-events`, the `alarm.event` stream message). Times are epoch ms."""
+
+    id: str
+    type: AlarmEventType
+    service: EmergencyService | None
+    triggerDeviceId: str | None
+    startedAt: int
+    sirenState: SirenState
+    dispatchState: DispatchState
+    cancelledAt: int | None
+    endedAt: int | None  # None while the event is open
+    details: str | None
+
+
+class SilenceResult(TypedDict):
+    silenced: list[AlarmEvent]
 
 
 class FaultedSensor(TypedDict):
@@ -71,6 +96,7 @@ class Sensor(TypedDict):
     armedHome: bool
     armedAway: bool
     alertsOnly: bool
+    alarmKind: NotRequired[AlarmKind | None]  # None on intrusion sensors; absent before service 3.2
     updatedAt: int
 
 
@@ -97,6 +123,7 @@ class SensorUpdate(TypedDict, total=False):
     zoneId: str
     placement: Placement
     alertsOnly: bool
+    alarmKind: AlarmKind
     armed: ArmedFlags
 
 

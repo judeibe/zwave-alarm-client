@@ -58,7 +58,12 @@ from .models import (
     KeypadSummary,
     LockoutPolicy,
     LockoutPolicyUpdate,
+    AlarmEvent,
+    AlarmKind,
     ArmedFlags,
+    PanicType,
+    EmergencyService,
+    SilenceResult,
     ModeConfig,
     ModeConfigUpdate,
     Panel,
@@ -256,6 +261,60 @@ async def async_disarm(
     )
 
 
+# --- Alarm events -----------------------------------------------------------
+
+
+async def async_panic(
+    session: aiohttp.ClientSession,
+    host: str,
+    port: int,
+    token: str | None,
+    type: PanicType,  # noqa: A002 - mirrors the service's body field
+    service: EmergencyService | None = None,
+    *,
+    secure: bool = False,
+) -> AlarmEvent:
+    """`POST /panel/panic`: raise a PANIC, FIRE, MEDICAL or SOS alarm event; allowed in every panel mode.
+
+    `service` (`police`, `fire`, `medical`) only matters for `SOS`. A bad body is `BadRequest`.
+    """
+    body: dict[str, Any] = {"type": type}
+    if service is not None:
+        body["service"] = service
+    return await _request(session, "POST", host, port, token, "/panel/panic", secure=secure, json=body)
+
+
+async def async_silence(
+    session: aiohttp.ClientSession, host: str, port: int, token: str | None, *, secure: bool = False
+) -> SilenceResult:
+    """`POST /panel/silence`: mute the siren but keep the alarm active; returns `{"silenced": [AlarmEvent]}`.
+
+    A `409` (nothing is sounding) is `Conflict`.
+    """
+    return await _request(session, "POST", host, port, token, "/panel/silence", secure=secure)
+
+
+async def async_get_alarm_events(
+    session: aiohttp.ClientSession,
+    host: str,
+    port: int,
+    token: str | None,
+    active: bool | None = None,
+    limit: int | None = None,
+    *,
+    secure: bool = False,
+) -> list[AlarmEvent]:
+    """`GET /alarm-events`, newest first. `active=True` keeps only open events; `limit` is 1-200 (service default 50)."""
+    params: dict[str, Any] = {}
+    if active is not None:
+        params["active"] = "true" if active else "false"
+    if limit is not None:
+        params["limit"] = limit
+    return await _request(
+        session, "GET", host, port, token, "/alarm-events", secure=secure, params=params or None
+    )
+
+
 # --- Zones & sensors --------------------------------------------------------
 
 
@@ -286,11 +345,12 @@ async def async_assign_sensor(
     placement: Placement | None = None,
     armed: ArmedFlags | None = None,
     alerts_only: bool | None = None,
+    alarm_kind: AlarmKind | None = None,
     secure: bool = False,
 ) -> dict[str, Any]:
     """`POST /zones/{zoneId}/sensors` (administrator only): assign an existing zwave-js node to a zone.
 
-    `placement`, `armed` (`{"home": bool, "away": bool}`) and `alerts_only` are sent only when given; the
+    `placement`, `armed` (`{"home": bool, "away": bool}`), `alerts_only` and `alarm_kind` (life-safety: `SMOKE`, `CO`, `FLOOD_FREEZE`) are sent only when given; the
     service defaults intrusion sensors to `MAIN_DOOR` armed per the spec (motion armed away only).
     `404` (unknown zone or node) -> `NotFound`; `409` (node already assigned) -> `Conflict`.
     """
@@ -309,6 +369,7 @@ async def async_assign_sensor(
             **({"placement": placement} if placement is not None else {}),
             **({"armed": dict(armed)} if armed is not None else {}),
             **({"alertsOnly": alerts_only} if alerts_only is not None else {}),
+            **({"alarmKind": alarm_kind} if alarm_kind is not None else {}),
         },
     )
 
