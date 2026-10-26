@@ -47,7 +47,10 @@ from .models import (
     LockCapabilities,
     LockScheduleSlots,
     LockSettingsUpdate,
+    LockModeSettings,
+    LockModeSettingsUpdate,
     LockSummary,
+    LockSync,
     LockUser,
     LockUserCode,
     WeekDaySchedule,
@@ -103,6 +106,11 @@ def base_url(host: str, port: int, *, secure: bool = False, scheme: str | None =
 
 def auth_headers(token: str | None) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"} if token else {}
+
+
+def _lock_sync(body: Any) -> list[LockSync]:
+    """`lockSync` of a code route's `200 {lockSync}` body; `[]` for the older `204` (no body)."""
+    return list(body.get("lockSync", [])) if isinstance(body, dict) else []
 
 
 async def _error_body(response: aiohttp.ClientResponse) -> tuple[str, str, dict[str, Any]]:
@@ -621,14 +629,18 @@ async def async_set_user_code(
     confirm_code: str | None = None,
     *,
     secure: bool = False,
-) -> None:
+) -> list[LockSync]:
     """`PUT /users/{userId}/code` (administrator only): set or replace the code (exactly 4 digits, write-only).
 
+    Returns one `LockSync` per enrolled lock (the code is pushed to a free slot on each; a `failed` entry does
+    not fail the call). Services before 3.7 answer `204`, in which case the list is empty.
     Resets the user's failed attempts and lockout. `409 code_in_use` -> `CodeInUse`; `409 code_limit` ->
     `CodeLimit`. `confirm_code` must equal `code` if sent; a mismatch or a non-4-digit code is `BadRequest`.
     """
     body = {"code": code, **({"confirmCode": confirm_code} if confirm_code is not None else {})}
-    await _request(session, "PUT", host, port, token, f"/users/{user_id}/code", secure=secure, json=body)
+    return _lock_sync(
+        await _request(session, "PUT", host, port, token, f"/users/{user_id}/code", secure=secure, json=body)
+    )
 
 
 async def async_set_duress_code(
@@ -661,12 +673,13 @@ async def async_delete_duress_code(
 
 async def async_clear_user_code(
     session: aiohttp.ClientSession, host: str, port: int, token: str | None, user_id: str, *, secure: bool = False
-) -> None:
+) -> list[LockSync]:
     """`DELETE /users/{userId}/code` (administrator only): the user can no longer disarm or log in.
 
-    `409` -> `Conflict` for the last administrator.
+    Also clears the user's slot on every enrolled lock and returns one `LockSync` per lock (empty on services
+    before 3.7, which answer `204`). `409` -> `Conflict` for the last administrator.
     """
-    await _request(session, "DELETE", host, port, token, f"/users/{user_id}/code", secure=secure)
+    return _lock_sync(await _request(session, "DELETE", host, port, token, f"/users/{user_id}/code", secure=secure))
 
 
 # --- Guest schedules --------------------------------------------------------
@@ -815,6 +828,42 @@ async def async_get_events(
     )
     params = {key: value for key, value in candidates if value is not None}
     return await _request(session, "GET", host, port, token, "/events", secure=secure, params=params)
+
+
+# --- Lock mode settings -----------------------------------------------------
+
+_LOCK_MODE_FIELDS = ("armOnLockWithCode", "armOnOneTouch", "disarmOnUnlock", "actions")
+
+
+async def async_get_lock_mode_settings(
+    session: aiohttp.ClientSession, host: str, port: int, token: str | None, node_id: int, *, secure: bool = False
+) -> LockModeSettings:
+    """`GET /locks/{nodeId}/mode-settings` (administrator, member or installer). An unknown lock is `NotFound`."""
+    return await _request(session, "GET", host, port, token, f"/locks/{node_id}/mode-settings", secure=secure)
+
+
+async def async_put_lock_mode_settings(
+    session: aiohttp.ClientSession,
+    host: str,
+    port: int,
+    token: str | None,
+    node_id: int,
+    *,
+    secure: bool = False,
+    **fields: Any,
+) -> LockModeSettings:
+    """`PUT /locks/{nodeId}/mode-settings` (administrator or installer) and return the settings.
+
+    Pass any of `armOnLockWithCode`, `armOnOneTouch`, `disarmOnUnlock` (booleans) and `actions` (a partial dict
+    of `disarmed` / `armed_home` / `armed_away` to `"lock"`, `"unlock"` or `None`, merged per mode). At least
+    one is required (`TypeError` for none or an unknown name, before any request); a bad value is `BadRequest`.
+    """
+    unknown = set(fields) - set(_LOCK_MODE_FIELDS)
+    if unknown or not fields:
+        raise TypeError(f"unexpected lock mode setting(s): {', '.join(sorted(unknown)) or '(none given)'}")
+    return await _request(
+        session, "PUT", host, port, token, f"/locks/{node_id}/mode-settings", secure=secure, json=fields
+    )
 
 
 # --- Mode schedules ---------------------------------------------------------

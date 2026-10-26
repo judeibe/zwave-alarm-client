@@ -26,7 +26,13 @@ SecurityEventType = Literal[
     "guest_schedule_added", "guest_schedule_updated", "guest_schedule_removed",
     "mode_schedule_added", "mode_schedule_updated", "mode_schedule_removed",
     "mode_schedule_applied", "mode_schedule_skipped",
-]  # lock and keypad kinds arrive with service phase 6
+    "lock_locked", "lock_unlocked", "lock_jammed", "lock_offline", "lock_online",  # deviceId "node-<n>"
+]  # keypad kinds arrive with service phase 6b
+LockAction = Literal["lock", "unlock"]
+LockModeKey = Literal["disarmed", "armed_home", "armed_away"]
+LockSyncStatus = Literal["synced", "failed"]
+LockEventKind = Literal["locked", "unlocked", "armed", "disarmed", "jammed"]
+LockMethod = Literal["keypad", "one_touch", "manual", "app", "auto", "unknown"]
 ModeScheduleMode = Literal["disarmed", "armed_home", "armed_away"]
 Placement = Literal["MAIN_DOOR", "SECONDARY_DOOR", "WINDOW", "ENTRYWAY", "ROOM", "GLASS_BREAK"]
 MODE_DELAY_RANGE = range(0, 181)  # whole seconds, per armed mode
@@ -171,6 +177,8 @@ class User(TypedDict):
     createdAt: int
     # Config-panel contract fields; absent on older services. A code is never returned, only whether one is set.
     hasCode: NotRequired[bool]
+    lockSlots: NotRequired[list[LockSlot]]  # absent before service 3.7
+    lockSync: NotRequired[list[LockSync]]  # only on the `POST /users` response when the user got a code
     hasDuressCode: NotRequired[bool]  # only an administrator can have one; absent before service 3.4
     haPersonId: NotRequired[str | None]
     haUserId: NotRequired[str | None]
@@ -374,6 +382,47 @@ class LockScheduleSlots(TypedDict):
     dailyRepeating: int
 
 
+class LockModeSettings(TypedDict):
+    """What an enrolled lock does with the alarm (`/locks/{nodeId}/mode-settings`); everything is off by default."""
+
+    armOnLockWithCode: bool  # locking with an app-created code arms away
+    armOnOneTouch: bool  # the one-touch button arms away
+    disarmOnUnlock: bool  # unlocking with an app-created code disarms
+    actions: dict[LockModeKey, LockAction | None]  # lock or unlock when the panel enters each mode
+
+
+class LockModeSettingsUpdate(TypedDict, total=False):
+    armOnLockWithCode: bool
+    armOnOneTouch: bool
+    disarmOnUnlock: bool
+    actions: dict[LockModeKey, LockAction | None]  # partial; merges per mode
+
+
+class LockSync(TypedDict):
+    """One lock's result when a user's code is pushed to, or cleared from, an enrolled lock."""
+
+    nodeId: int
+    slot: int
+    status: LockSyncStatus
+    message: NotRequired[str]
+
+
+class LockSlot(TypedDict):
+    nodeId: int
+    slot: int
+    status: LockSyncStatus
+
+
+class LockEvent(TypedDict):
+    """The `lock.event` stream message."""
+
+    type: Literal["lock.event"]
+    nodeId: int
+    kind: LockEventKind
+    userId: str | None  # the app user behind the code, when it is one of ours
+    method: LockMethod
+
+
 class LockSummary(TypedDict):
     """A lock as listed by `GET /locks` and carried by `lock.changed` and the snapshot's `locks`.
 
@@ -392,6 +441,7 @@ class LockSummary(TypedDict):
     userSlotCount: int
     locked: NotRequired[bool | None]  # True = bolt thrown, False = retracted, None = not reported yet
     capabilities: NotRequired[LockCapabilities]  # absent on services that predate it; use `lock_capabilities()`
+    modeSettings: NotRequired[LockModeSettings]  # absent before service 3.7
 
 
 class LockScheduleCapabilities(TypedDict):
