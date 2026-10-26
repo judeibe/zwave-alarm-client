@@ -339,8 +339,8 @@ async def test_user_ha_links_filter_update_and_code() -> None:
         )
         users = await _call(api.async_list_users, TOKEN, ha_person_id="person.alex")
         await _call(api.async_update_user, TOKEN, "u1", {"role": "administrator", "haUserId": None})
-        assert await _call(api.async_set_user_code, TOKEN, "u1", "5678") is None
-        assert await _call(api.async_clear_user_code, TOKEN, "u1") is None
+        assert await _call(api.async_set_user_code, TOKEN, "u1", "5678") == []  # 204 (service before 3.7)
+        assert await _call(api.async_clear_user_code, TOKEN, "u1") == []
         (create,) = mocked.requests[("POST", URL(f"{BASE}/users"))]
         (patch,) = mocked.requests[("PATCH", URL(f"{BASE}/users/u1"))]
         (put,) = mocked.requests[("PUT", URL(f"{BASE}/users/u1/code"))]
