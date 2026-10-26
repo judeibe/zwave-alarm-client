@@ -33,6 +33,8 @@ LockModeKey = Literal["disarmed", "armed_home", "armed_away"]
 LockSyncStatus = Literal["synced", "failed"]
 LockEventKind = Literal["locked", "unlocked", "armed", "disarmed", "jammed"]
 LockMethod = Literal["keypad", "one_touch", "manual", "app", "auto", "unknown"]
+ChirpTone = Literal["none", "double_beep", "guitar", "wind_chimes", "bing_bong", "doorbell"]
+KEYPAD_VOLUME_RANGE = range(0, 100)  # whole levels, 0-99
 ModeScheduleMode = Literal["disarmed", "armed_home", "armed_away"]
 Placement = Literal["MAIN_DOOR", "SECONDARY_DOOR", "WINDOW", "ENTRYWAY", "ROOM", "GLASS_BREAK"]
 MODE_DELAY_RANGE = range(0, 181)  # whole seconds, per armed mode
@@ -79,23 +81,33 @@ class FaultedSensor(TypedDict):
 class ModeDelays(TypedDict):
     entryDelaySec: int
     exitDelaySec: int
+    chirpsEnabled: NotRequired[bool]  # sensor chirps in this mode; absent before service 3.8
+
+
+class ModeChirps(TypedDict):
+    """The `disarmed` mode has no delays, only the chirp toggle."""
+
+    chirpsEnabled: bool
 
 
 class ModeConfig(TypedDict):
-    """`GET /modes`: entry and exit delay for each armed mode."""
+    """`GET /modes`: delays and chirps for each armed mode, and the disarmed chirp toggle."""
 
     armed_home: ModeDelays
     armed_away: ModeDelays
+    disarmed: NotRequired[ModeChirps]  # absent before service 3.8
 
 
 class ModeDelaysUpdate(TypedDict, total=False):
     entryDelaySec: int
     exitDelaySec: int
+    chirpsEnabled: bool
 
 
 class ModeConfigUpdate(TypedDict, total=False):
     armed_home: ModeDelaysUpdate
     armed_away: ModeDelaysUpdate
+    disarmed: ModeChirps
 
 
 class Panel(TypedDict):
@@ -124,6 +136,7 @@ class Sensor(TypedDict):
     armedAway: bool
     alertsOnly: bool
     alarmKind: NotRequired[AlarmKind | None]  # None on intrusion sensors; absent before service 3.2
+    chirpTone: NotRequired[ChirpTone | None]  # None on life-safety sensors; absent before service 3.8
     tampered: NotRequired[bool]  # cover removed; absent before service 3.3
     updatedAt: int
 
@@ -152,6 +165,7 @@ class SensorUpdate(TypedDict, total=False):
     placement: Placement
     alertsOnly: bool
     alarmKind: AlarmKind
+    chirpTone: ChirpTone
     armed: ArmedFlags
 
 
@@ -277,12 +291,14 @@ class KeypadSettings(TypedDict):
     """`GET /keypad-settings`, also the snapshot's `keypadSettings` and a `keypad.settings` message's `settings`."""
 
     requireCodeToArm: bool  # arming from a keypad needs a valid user code; disarming always does
+    volume: NotRequired[int]  # 0-99, chirps, delay tones and announcements (not the siren); absent before service 3.8
 
 
 class KeypadSettingsUpdate(TypedDict, total=False):
     """Any non-empty subset of `KeypadSettings` for `PATCH /keypad-settings`."""
 
     requireCodeToArm: bool
+    volume: int
 
 
 class KeypadInput(TypedDict):

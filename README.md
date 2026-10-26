@@ -21,18 +21,18 @@ Every call takes `(session, host, port, token, ...)`; `token` is optional: pass 
 |---|---|
 | Auth | `async_login`, `async_logout` |
 | Panel | `async_get_panel_state`, `async_validate_connection`, `async_arm` (`bypass=`, `source=`; `NeedsBypass` carries `faulted`), `async_disarm` (zone-restricted guests return a panel with `disarmedZoneIds`) |
-| Zones & sensors | `async_get_zones`, `async_create_zone`, `async_update_zone`, `async_delete_zone` (`force=`), `async_list_discoverable_sensors`, `async_assign_sensor`, `async_update_sensor` (also `placement`, `alertsOnly`, `armed={home, away}`), `async_unassign_sensor` |
+| Zones & sensors | `async_get_zones`, `async_create_zone`, `async_update_zone`, `async_delete_zone` (`force=`), `async_list_discoverable_sensors`, `async_assign_sensor`, `async_update_sensor` (also `placement`, `alertsOnly`, `armed={home, away}`, `chirpTone`), `async_unassign_sensor` |
 | Users | `async_list_users` (`ha_person_id=` filter), `async_create_user` (`code` optional; guest expiry / `guest_zone_id`, `ha_person_id`, `ha_user_id`), `async_update_user`, `async_delete_user` |
 | Codes (write-only) | `async_set_user_code(confirm_code=)` and `async_clear_user_code` return the per-lock `lockSync` list (codes are pushed to every enrolled lock; empty on services before 3.7), `async_set_duress_code`, `async_delete_duress_code`; users expose only `hasCode` and `hasDuressCode`. Codes are exactly 4 digits and unique (`CodeInUse`), at most 256 per location (`CodeLimit`). Role `installer` expires 48 h after creation. |
 | Guest schedules | `async_get_guest_schedules`, `async_create_guest_schedule(user_id, name, days, all_day=, start=, end=, time_zone=)`, `async_update_guest_schedule(user_id, schedule_id, **fields)`, `async_delete_guest_schedule`. Keypad only (locks do not enforce them); an `end` at or before `start` is overnight. |
 | Lockout policy | `async_get_lockout_policy`, `async_update_lockout_policy` |
-| Modes | `async_get_modes`, `async_update_modes` (per-mode entry/exit delay, 0-180 s, default 60 s; administrator to change) |
+| Modes | `async_get_modes`, `async_update_modes` (per-mode entry/exit delay, 0-180 s, default 60 s, and `chirpsEnabled` per mode including `disarmed`; administrator to change) |
 | Alarm events | `async_panic(type, service=)` (PANIC, FIRE, MEDICAL, SOS), `async_silence`, `async_get_alarm_events(active=, limit=)`; `alarm.event` stream message |
 | Sirens | `async_get_sirens`, `async_put_siren(node_id, kind, name=, duration_sec=)` (OUTDOOR 60-600 s, others fixed 600 s), `async_delete_siren`; `siren.changed` / `siren.removed` stream messages |
 | Events | `async_get_events` (filters `type` (str or list), `device_id`, `user_id`, `since`, `until`, `before`, `limit` 1-500; events carry `actor`, `deviceId`, `deviceName`) |
 | Mode schedules | `async_get_mode_schedules`, `async_create_mode_schedule`, `async_update_mode_schedule(schedule_id, **fields)`, `async_delete_mode_schedule`; a clash is `ScheduleConflict` (`conflicts_with`); `mode-schedule.changed` / `.removed` stream messages |
 | HA links | `async_create_ha_link`, `async_delete_ha_link` |
-| Keypads | `async_list_keypads`, `async_chime_keypad`, `async_get_keypad_settings`, `async_update_keypad_settings` (`requireCodeToArm`; administrator to change) |
+| Keypads | `async_list_keypads`, `async_chime_keypad`, `async_get_keypad_settings`, `async_update_keypad_settings` (`requireCodeToArm`, `volume` 0-99; administrator to change) |
 | Schlage locks | `async_list_locks`, `async_get_lock`, `async_refresh_lock`, `async_update_lock_settings`, `async_list_lock_users`, `async_set_lock_user_code`, `async_clear_lock_user_code`, `async_get_lock_schedule_slots`, `async_set_lock_schedules_enabled`, `async_get_lock_schedule`, `async_set_lock_schedule`, `async_clear_lock_schedule`, `async_list_discoverable_locks`, `async_enroll_lock`, `async_unenroll_lock`, `async_set_locked`, `async_get_lock_mode_settings`, `async_put_lock_mode_settings` (arm on lock with a code or one touch, disarm on unlock, per-mode lock/unlock actions; all off by default; `lock.event` stream message); `lock_capabilities`, `lock_supports_schedule`, `validate_lock_code` (see below) |
 | Push channel | `async_stream_events` (sends keepalive pings, drops `pong`s; reconnect policy is the caller's) |
 

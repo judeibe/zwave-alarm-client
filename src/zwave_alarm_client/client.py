@@ -71,6 +71,7 @@ from .models import (
     AlarmEvent,
     AlarmKind,
     ArmedFlags,
+    ChirpTone,
     PanicType,
     EmergencyService,
     SilenceResult,
@@ -410,11 +411,12 @@ async def async_assign_sensor(
     armed: ArmedFlags | None = None,
     alerts_only: bool | None = None,
     alarm_kind: AlarmKind | None = None,
+    chirp_tone: ChirpTone | None = None,
     secure: bool = False,
 ) -> dict[str, Any]:
     """`POST /zones/{zoneId}/sensors` (administrator only): assign an existing zwave-js node to a zone.
 
-    `placement`, `armed` (`{"home": bool, "away": bool}`), `alerts_only` and `alarm_kind` (life-safety: `SMOKE`, `CO`, `FLOOD_FREEZE`) are sent only when given; the
+    `placement`, `armed` (`{"home": bool, "away": bool}`), `alerts_only`, `alarm_kind` (life-safety: `SMOKE`, `CO`, `FLOOD_FREEZE`) and `chirp_tone` (intrusion only; default `double_beep`) are sent only when given; the
     service defaults intrusion sensors to `MAIN_DOOR` armed per the spec (motion armed away only).
     `404` (unknown zone or node) -> `NotFound`; `409` (node already assigned) -> `Conflict`.
     """
@@ -434,6 +436,7 @@ async def async_assign_sensor(
             **({"armed": dict(armed)} if armed is not None else {}),
             **({"alertsOnly": alerts_only} if alerts_only is not None else {}),
             **({"alarmKind": alarm_kind} if alarm_kind is not None else {}),
+            **({"chirpTone": chirp_tone} if chirp_tone is not None else {}),
         },
     )
 
@@ -491,7 +494,8 @@ async def async_update_sensor(
     """`PATCH /sensors/{sensorId}` (administrator only): rename, recategorise, move to another `zoneId`, or set
     `placement`, `alertsOnly` and per-mode `armed` (`{"home": bool, "away": bool}`; either key alone is fine).
 
-    `400` (empty body, bad value, or `placement` on a life-safety sensor) -> `BadRequest`; `404` -> `NotFound`.
+    `chirpTone` (`none`, `double_beep`, `guitar`, `wind_chimes`, `bing_bong`, `doorbell`) is intrusion-only.
+    `400` (empty body, bad value, or `placement` / `chirpTone` on a life-safety sensor) -> `BadRequest`; `404` -> `NotFound`.
     The returned sensor carries the flat `armedHome` / `armedAway` fields."""
     return await _request(
         session, "PATCH", host, port, token, f"/sensors/{sensor_id}", secure=secure, json=dict(update)
@@ -511,7 +515,8 @@ async def async_unassign_sensor(
 async def async_get_modes(
     session: aiohttp.ClientSession, host: str, port: int, token: str | None, *, secure: bool = False
 ) -> ModeConfig:
-    """`GET /modes`: entry and exit delay (whole seconds, 0-180, default 60) for `armed_home` and `armed_away`."""
+    """`GET /modes`: entry and exit delay (whole seconds, 0-180, default 60) and `chirpsEnabled` for `armed_home` and
+    `armed_away`, plus `disarmed: {chirpsEnabled}` (the chirp fields and `disarmed` need service 3.8)."""
     return await _request(session, "GET", host, port, token, "/modes", secure=secure)
 
 
@@ -525,6 +530,9 @@ async def async_update_modes(
     secure: bool = False,
 ) -> ModeConfig:
     """`PATCH /modes` (administrator only) with a partial per-mode change; returns the full config.
+
+    `armed_home` / `armed_away` take `entryDelaySec`, `exitDelaySec` and `chirpsEnabled`; `disarmed` takes only
+    `chirpsEnabled`. An empty body or empty per-mode object is `BadRequest`.
 
     A delay outside 0-180 or an empty body is `400` -> `BadRequest`; a non-administrator gets `Forbidden`.
     """
@@ -1007,7 +1015,8 @@ async def async_update_keypad_settings(
     *,
     secure: bool = False,
 ) -> KeypadSettings:
-    """`PATCH /keypad-settings` (administrator only) with any non-empty subset of the settings.
+    """`PATCH /keypad-settings` (administrator only) with any non-empty subset of the settings
+    (`requireCodeToArm`, `volume` 0-99).
 
     `403` -> `Forbidden`; `400` (empty or malformed body) -> `BadRequest`.
     """
