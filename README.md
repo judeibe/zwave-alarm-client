@@ -92,7 +92,7 @@ Response shapes are available as `TypedDict`s in `zwave_alarm_client.models`.
 
 ## Errors
 
-All derive from `ZwaveAlarmError`: `CannotConnect` (unreachable, timeout, 5xx; `ServiceUnavailable` for 503), `InvalidAuth` (401), `Forbidden` (403), `NotFound` (404), `BadRequest` (400, message names the field), `Conflict` (409; `CommandRejected` for a lost arm/disarm race, `ZoneNotEmpty`, `ZoneInUse`, `CodeInUse`), `AccountLocked` (423), `TooManyRequests` (429, `.retry_after`), `ScheduleKindUnsupported` (400 `schedule_kind_unsupported`, a `BadRequest`), `LockNotSecure` (409 `lock_not_secure`, a `Conflict`), `LockUnavailable` (502 `lock_unavailable`, a `CannotConnect`).
+All derive from `ZwaveAlarmError`: `CannotConnect` (unreachable, timeout, 5xx; `ServiceUnavailable` for 503), `InvalidAuth` (401), `Forbidden` (403), `NotFound` (404), `BadRequest` (400, message names the field), `Conflict` (409; `CommandRejected` for a lost arm/disarm race, `ZoneNotEmpty`, `ZoneInUse`, `CodeInUse`, `CodeLimit`, `NeedsBypass` (`.faulted`), `ScheduleConflict` (`.conflicts_with`)), `AccountLocked` (423), `TooManyRequests` (429 `too_many_requests` on login or on `async_disarm` after 10 failed attempts per IP per minute; `.retry_after` is the `Retry-After` seconds, or `None` if the header is missing or not whole seconds), `ScheduleKindUnsupported` (400 `schedule_kind_unsupported`, a `BadRequest`), `LockNotSecure` (409 `lock_not_secure`, a `Conflict`), `LockUnavailable` (502 `lock_unavailable`, a `CannotConnect`).
 
 ## Development
 
