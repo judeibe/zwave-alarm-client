@@ -89,3 +89,12 @@ async def test_disarm_rate_limit_is_too_many_requests() -> None:
         with pytest.raises(api.TooManyRequests) as info:
             await _call(api.async_disarm, "0000")
     assert info.value.retry_after == 30.0
+
+
+async def test_disarm_rate_limit_without_usable_retry_after_is_none() -> None:
+    for headers in ({}, {"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"}):
+        with aioresponses() as mocked:
+            mocked.post(f"{BASE}/panel/disarm", status=429, payload=_err("too_many_requests"), headers=headers)
+            with pytest.raises(api.TooManyRequests) as info:
+                await _call(api.async_disarm, "0000")
+        assert info.value.retry_after is None
