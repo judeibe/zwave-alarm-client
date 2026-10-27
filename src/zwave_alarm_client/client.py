@@ -276,6 +276,7 @@ async def async_disarm(
     A `401` means the code (not the token) was rejected; `423` means the
     account is locked (FR-016). In the service's `trigger_alarm` lockout mode
     a wrong code instead returns `200` with the panel already `alarm_triggered`.
+    More than 10 failed attempts per client IP per minute are `429` -> `TooManyRequests` (`retry_after`).
     A zone-restricted guest's code disarms only its zone: the returned panel
     keeps its mode and lists the zone in `disarmedZoneIds` (FR-010a).
     """
