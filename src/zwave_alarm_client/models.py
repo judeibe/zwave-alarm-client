@@ -149,7 +149,8 @@ class Sensor(TypedDict):
     sensorKind: NotRequired[SensorKind]  # absent before service 3.9
     entryway: NotRequired[str | None]  # free-text entryway name, 1-60 characters; absent before service 3.9
     isInterior: NotRequired[bool]  # inside the home rather than the perimeter; absent before service 3.9
-    quickEntrySupported: NotRequired[bool]  # the entryway's lock supports quick entry; absent before service 3.9
+    quickExitEnabled: NotRequired[bool]  # the sensor's quick-exit button is on; absent before service 3.10
+    quickEntrySupported: NotRequired[bool]  # deprecated alias of `quickExitEnabled`; absent before service 3.9
     updatedAt: int
 
 
@@ -183,8 +184,16 @@ class SensorUpdate(TypedDict, total=False):
     sensorKind: SensorKind
     entryway: str | None  # None clears it
     isInterior: bool
-    quickEntrySupported: bool
+    quickExitEnabled: bool  # intrusion only; wins over `quickEntrySupported` if both are sent
+    quickEntrySupported: bool  # deprecated alias of `quickExitEnabled`
     armed: ArmedFlags
+
+
+class QuickExit(TypedDict):
+    """`POST /sensors/{sensorId}/quick-exit`: the 5 s window during which this sensor's breach is ignored."""
+
+    sensorId: str
+    expiresAt: str  # ISO 8601 time, now + 5000 ms
 
 
 class DiscoverableSensor(TypedDict):
