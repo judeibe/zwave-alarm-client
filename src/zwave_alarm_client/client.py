@@ -33,6 +33,8 @@ from .errors import (
     LockUnavailable,
     NeedsBypass,
     NotFound,
+    QuickExitDisabled,
+    QuickExitUnavailable,
     ScheduleConflict,
     ScheduleKindUnsupported,
     ServiceUnavailable,
@@ -75,6 +77,7 @@ from .models import (
     ArmedFlags,
     ChirpTone,
     PanicType,
+    QuickExit,
     Sensor,
     SensorKind,
     SupportedDevice,
@@ -181,6 +184,10 @@ async def _request(
                         raise CodeInUse(message)
                     if code == "code_limit":
                         raise CodeLimit(message)
+                    if code == "quick_exit_disabled":
+                        raise QuickExitDisabled(message)
+                    if code == "quick_exit_unavailable":
+                        raise QuickExitUnavailable(message)
                     if code == "lock_not_secure":
                         raise LockNotSecure(message)
                     raise conflict(message)
@@ -428,6 +435,7 @@ async def async_assign_sensor(
     sensor_kind: SensorKind | None = None,
     entryway: str | None = None,
     is_interior: bool | None = None,
+    quick_exit_enabled: bool | None = None,
     quick_entry_supported: bool | None = None,
     secure: bool = False,
 ) -> dict[str, Any]:
@@ -435,8 +443,8 @@ async def async_assign_sensor(
 
     `placement`, `armed` (`{"home": bool, "away": bool}`), `alerts_only`, `alarm_kind` (life-safety: `SMOKE`, `CO`, `FLOOD_FREEZE`) and `chirp_tone` (intrusion only; default `double_beep`) are sent only when given; the
     service defaults intrusion sensors to `MAIN_DOOR` armed per the spec (motion armed away only).
-    From service 3.9 `chime_enabled`, `chime_sound`, `sensor_kind`, `entryway`, `is_interior` and `quick_entry_supported`
-    are sent only when given too; `sensor_kind` defaults from the device model and the chime to on with `double_beep`.
+    From service 3.9 `chime_enabled`, `chime_sound`, `sensor_kind`, `entryway`, `is_interior` and `quick_exit_enabled`
+    (service 3.10; `quick_entry_supported` is its deprecated alias) are sent only when given too; `sensor_kind` defaults from the device model and the chime to on with `double_beep`.
     `404` (unknown zone or node) -> `NotFound`; `409` (node already assigned) -> `Conflict`;
     `422 unsupported_device` -> `UnsupportedDevice`; `422 category_mismatch` -> `CategoryMismatch`.
     """
@@ -462,6 +470,7 @@ async def async_assign_sensor(
             **({"sensorKind": sensor_kind} if sensor_kind is not None else {}),
             **({"entryway": entryway} if entryway is not None else {}),
             **({"isInterior": is_interior} if is_interior is not None else {}),
+            **({"quickExitEnabled": quick_exit_enabled} if quick_exit_enabled is not None else {}),
             **({"quickEntrySupported": quick_entry_supported} if quick_entry_supported is not None else {}),
         },
     )
@@ -546,13 +555,31 @@ async def async_update_sensor(
 
     `chirpTone` (`none`, `double_beep`, `guitar`, `wind_chimes`, `bing_bong`, `doorbell`) is intrusion-only.
     From service 3.9 the update also takes `chimeEnabled`, `chimeSound` (same value as `chirpTone`), `sensorKind`
-    (`door`, `window`, `interior`), `entryway` (1-60 characters, `None` clears it), `isInterior` and `quickEntrySupported`;
+    (`door`, `window`, `interior`), `entryway` (1-60 characters, `None` clears it), `isInterior` and `quickExitEnabled` (service 3.10; `quickEntrySupported` is its deprecated alias);
     the chime fields are intrusion-only like `chirpTone`.
     `400` (empty body, bad value, or `placement` / `chirpTone` on a life-safety sensor) -> `BadRequest`; `404` -> `NotFound`.
     The returned sensor carries the flat `armedHome` / `armedAway` fields."""
     return await _request(
         session, "PATCH", host, port, token, f"/sensors/{sensor_id}", secure=secure, json=dict(update)
     )
+
+
+async def async_quick_exit(
+    session: aiohttp.ClientSession,
+    host: str,
+    port: int,
+    token: str | None,
+    sensor_id: str,
+    *,
+    secure: bool = False,
+) -> QuickExit:
+    """`POST /sensors/{sensorId}/quick-exit` (service 3.10+; not for guests): press the sensor's quick-exit button.
+
+    For 5 s a breach of that sensor is ignored; other sensors, life-safety sensors and tamper are unaffected.
+    `404` -> `NotFound`; `409 quick_exit_disabled` -> `QuickExitDisabled` (off, or a life-safety sensor);
+    `409 quick_exit_unavailable` -> `QuickExitUnavailable` (panel not armed Home, or the sensor is open,
+    tampered or offline). Both are `Conflict`s."""
+    return await _request(session, "POST", host, port, token, f"/sensors/{sensor_id}/quick-exit", secure=secure)
 
 
 async def async_unassign_sensor(

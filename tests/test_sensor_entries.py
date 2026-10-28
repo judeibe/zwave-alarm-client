@@ -17,7 +17,7 @@ SENSOR = {
     "currentState": "normal", "batteryLevel": 90, "connectivityStatus": "online", "placement": "MAIN_DOOR",
     "armedHome": True, "armedAway": True, "alertsOnly": False, "alarmKind": None, "chirpTone": "double_beep",
     "chimeEnabled": True, "chimeSound": "double_beep", "sensorKind": "door", "entryway": "Front door",
-    "isInterior": False, "quickEntrySupported": False, "updatedAt": 1,
+    "isInterior": False, "quickExitEnabled": False, "quickEntrySupported": False, "updatedAt": 1,
 }
 
 
@@ -102,8 +102,48 @@ async def test_unknown_422_is_not_a_connection_error_mapping() -> None:
 
 
 async def test_older_sensor_without_entry_fields_still_parses() -> None:
-    old = {k: v for k, v in SENSOR.items() if k not in {"chimeEnabled", "chimeSound", "sensorKind", "entryway", "isInterior", "quickEntrySupported"}}
+    old = {k: v for k, v in SENSOR.items() if k not in {"chimeEnabled", "chimeSound", "sensorKind", "entryway", "isInterior", "quickExitEnabled", "quickEntrySupported"}}
     with aioresponses() as mocked:
         mocked.get(f"{BASE}/sensors/s1", payload=old)
         got = await _call(api.async_get_sensor, "s1")
     assert "sensorKind" not in got
+
+
+async def test_quick_exit_posts_and_returns_the_window() -> None:
+    reply = {"sensorId": "s1", "expiresAt": "2026-10-28T13:28:28.000Z"}
+    with aioresponses() as mocked:
+        mocked.post(f"{BASE}/sensors/s1/quick-exit", payload=reply)
+        assert await _call(api.async_quick_exit, "s1") == reply
+        (request,) = mocked.requests[("POST", URL(f"{BASE}/sensors/s1/quick-exit"))]
+    assert "json" not in request.kwargs
+
+
+@pytest.mark.parametrize(
+    ("code", "exc"),
+    [("quick_exit_disabled", api.QuickExitDisabled), ("quick_exit_unavailable", api.QuickExitUnavailable)],
+)
+async def test_quick_exit_409s_are_typed_conflicts(code: str, exc: type[Exception]) -> None:
+    with aioresponses() as mocked:
+        mocked.post(f"{BASE}/sensors/s1/quick-exit", status=409, payload=_err(code))
+        with pytest.raises(exc) as info:
+            await _call(api.async_quick_exit, "s1")
+    assert isinstance(info.value, api.Conflict)
+
+
+async def test_quick_exit_unknown_sensor_is_not_found() -> None:
+    with aioresponses() as mocked:
+        mocked.post(f"{BASE}/sensors/nope/quick-exit", status=404, payload=_err("not_found"))
+        with pytest.raises(api.NotFound):
+            await _call(api.async_quick_exit, "nope")
+
+
+async def test_assign_and_update_send_quick_exit_and_keep_the_old_alias() -> None:
+    with aioresponses() as mocked:
+        mocked.post(f"{BASE}/zones/z1/sensors", payload=SENSOR)
+        mocked.patch(f"{BASE}/sensors/s1", payload=SENSOR)
+        await _call(api.async_assign_sensor, "z1", 39, "Door", "intrusion", quick_exit_enabled=True)
+        await _call(api.async_update_sensor, "s1", {"quickExitEnabled": False})
+        (post,) = mocked.requests[("POST", URL(f"{BASE}/zones/z1/sensors"))]
+        (patch,) = mocked.requests[("PATCH", URL(f"{BASE}/sensors/s1"))]
+    assert post.kwargs["json"]["quickExitEnabled"] is True and "quickEntrySupported" not in post.kwargs["json"]
+    assert patch.kwargs["json"] == {"quickExitEnabled": False}

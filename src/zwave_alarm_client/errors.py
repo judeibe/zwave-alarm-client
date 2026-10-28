@@ -112,6 +112,14 @@ class TooManyRequests(ZwaveAlarmError):
         self.retry_after = retry_after
 
 
+class QuickExitDisabled(Conflict):
+    """Quick exit is off for this sensor or it is a life-safety sensor (409 `quick_exit_disabled`)."""
+
+
+class QuickExitUnavailable(Conflict):
+    """Quick exit cannot start now (409 `quick_exit_unavailable`): the panel is not armed Home, or the sensor is open, tampered or offline."""
+
+
 class UnsupportedDevice(ZwaveAlarmError):
     """The node is not a device Ring supports as a sensor (422 `unsupported_device`); see `async_list_supported_devices`."""
 
