@@ -36,6 +36,12 @@ LockMethod = Literal["keypad", "one_touch", "manual", "app", "auto", "unknown"]
 ChirpTone = Literal["none", "double_beep", "guitar", "wind_chimes", "bing_bong", "doorbell"]
 KEYPAD_VOLUME_RANGE = range(0, 100)  # whole levels, 0-99
 ModeScheduleMode = Literal["disarmed", "armed_home", "armed_away"]
+SensorKind = Literal["door", "window", "interior"]  # what a sensor watches; descriptive, `placement` drives the entry delay
+SupportedDeviceType = Literal[
+    "contact", "motion", "glass_break", "flood_freeze", "smoke_co", "outdoor_contact", "range_extender"
+]
+SupportedBrand = Literal["Ring", "First Alert"]
+ENTRYWAY_MAX_LENGTH = 60
 Placement = Literal["MAIN_DOOR", "SECONDARY_DOOR", "WINDOW", "ENTRYWAY", "ROOM", "GLASS_BREAK"]
 MODE_DELAY_RANGE = range(0, 181)  # whole seconds, per armed mode
 
@@ -138,6 +144,12 @@ class Sensor(TypedDict):
     alarmKind: NotRequired[AlarmKind | None]  # None on intrusion sensors; absent before service 3.2
     chirpTone: NotRequired[ChirpTone | None]  # None on life-safety sensors; absent before service 3.8
     tampered: NotRequired[bool]  # cover removed; absent before service 3.3
+    chimeEnabled: NotRequired[bool]  # keypad chime on trip; always False on life-safety; absent before service 3.9
+    chimeSound: NotRequired[ChirpTone | None]  # alias of `chirpTone`; None on life-safety; absent before service 3.9
+    sensorKind: NotRequired[SensorKind]  # absent before service 3.9
+    entryway: NotRequired[str | None]  # free-text entryway name, 1-60 characters; absent before service 3.9
+    isInterior: NotRequired[bool]  # inside the home rather than the perimeter; absent before service 3.9
+    quickEntrySupported: NotRequired[bool]  # the entryway's lock supports quick entry; absent before service 3.9
     updatedAt: int
 
 
@@ -166,11 +178,17 @@ class SensorUpdate(TypedDict, total=False):
     alertsOnly: bool
     alarmKind: AlarmKind
     chirpTone: ChirpTone
+    chimeEnabled: bool  # intrusion only
+    chimeSound: ChirpTone  # intrusion only; same value as `chirpTone`
+    sensorKind: SensorKind
+    entryway: str | None  # None clears it
+    isInterior: bool
+    quickEntrySupported: bool
     armed: ArmedFlags
 
 
 class DiscoverableSensor(TypedDict):
-    """An unassigned zwave-js node from `GET /sensors/discoverable`."""
+    """An unassigned, supported zwave-js node from `GET /sensors/discoverable` (service 3.9 lists only supported nodes)."""
 
     zwaveNodeId: int
     name: str | None
@@ -178,6 +196,24 @@ class DiscoverableSensor(TypedDict):
     product: str | None
     suggestedCategory: SensorCategory | None
     status: Literal["alive", "dead", "asleep"]
+    brand: NotRequired[SupportedBrand]  # the fields below are absent before service 3.9
+    model: NotRequired[str]
+    deviceType: NotRequired[SupportedDeviceType]
+    suggestedSensorKind: NotRequired[SensorKind]
+
+
+class SupportedDevice(TypedDict):
+    """One allowlist entry of `GET /sensors/supported-devices`; ids are decimal."""
+
+    brand: SupportedBrand
+    model: str
+    manufacturerId: int
+    productType: int
+    productId: int
+    deviceType: SupportedDeviceType
+    category: SensorCategory | None  # None for a range extender: it only relays and never becomes an entry
+    alarmKind: NotRequired[AlarmKind]
+    suggestedSensorKind: SensorKind
 
 
 class User(TypedDict):

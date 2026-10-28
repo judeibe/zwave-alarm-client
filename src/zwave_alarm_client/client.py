@@ -22,6 +22,7 @@ from .errors import (
     AccountLocked,
     BadRequest,
     CannotConnect,
+    CategoryMismatch,
     CodeInUse,
     CodeLimit,
     CommandRejected,
@@ -36,6 +37,7 @@ from .errors import (
     ScheduleKindUnsupported,
     ServiceUnavailable,
     TooManyRequests,
+    UnsupportedDevice,
     ZoneInUse,
     ZoneNotEmpty,
 )
@@ -73,6 +75,9 @@ from .models import (
     ArmedFlags,
     ChirpTone,
     PanicType,
+    Sensor,
+    SensorKind,
+    SupportedDevice,
     EmergencyService,
     SilenceResult,
     Siren,
@@ -179,6 +184,11 @@ async def _request(
                     if code == "lock_not_secure":
                         raise LockNotSecure(message)
                     raise conflict(message)
+                if status == 422:
+                    if code == "unsupported_device":
+                        raise UnsupportedDevice(message)
+                    if code == "category_mismatch":
+                        raise CategoryMismatch(message)
                 if status == 423:
                     raise AccountLocked(message)
                 if status == 429:
@@ -413,13 +423,22 @@ async def async_assign_sensor(
     alerts_only: bool | None = None,
     alarm_kind: AlarmKind | None = None,
     chirp_tone: ChirpTone | None = None,
+    chime_enabled: bool | None = None,
+    chime_sound: ChirpTone | None = None,
+    sensor_kind: SensorKind | None = None,
+    entryway: str | None = None,
+    is_interior: bool | None = None,
+    quick_entry_supported: bool | None = None,
     secure: bool = False,
 ) -> dict[str, Any]:
     """`POST /zones/{zoneId}/sensors` (administrator only): assign an existing zwave-js node to a zone.
 
     `placement`, `armed` (`{"home": bool, "away": bool}`), `alerts_only`, `alarm_kind` (life-safety: `SMOKE`, `CO`, `FLOOD_FREEZE`) and `chirp_tone` (intrusion only; default `double_beep`) are sent only when given; the
     service defaults intrusion sensors to `MAIN_DOOR` armed per the spec (motion armed away only).
-    `404` (unknown zone or node) -> `NotFound`; `409` (node already assigned) -> `Conflict`.
+    From service 3.9 `chime_enabled`, `chime_sound`, `sensor_kind`, `entryway`, `is_interior` and `quick_entry_supported`
+    are sent only when given too; `sensor_kind` defaults from the device model and the chime to on with `double_beep`.
+    `404` (unknown zone or node) -> `NotFound`; `409` (node already assigned) -> `Conflict`;
+    `422 unsupported_device` -> `UnsupportedDevice`; `422 category_mismatch` -> `CategoryMismatch`.
     """
     return await _request(
         session,
@@ -438,6 +457,12 @@ async def async_assign_sensor(
             **({"alertsOnly": alerts_only} if alerts_only is not None else {}),
             **({"alarmKind": alarm_kind} if alarm_kind is not None else {}),
             **({"chirpTone": chirp_tone} if chirp_tone is not None else {}),
+            **({"chimeEnabled": chime_enabled} if chime_enabled is not None else {}),
+            **({"chimeSound": chime_sound} if chime_sound is not None else {}),
+            **({"sensorKind": sensor_kind} if sensor_kind is not None else {}),
+            **({"entryway": entryway} if entryway is not None else {}),
+            **({"isInterior": is_interior} if is_interior is not None else {}),
+            **({"quickEntrySupported": quick_entry_supported} if quick_entry_supported is not None else {}),
         },
     )
 
@@ -482,6 +507,30 @@ async def async_list_discoverable_sensors(
     return await _request(session, "GET", host, port, token, "/sensors/discoverable", secure=secure)
 
 
+async def async_get_sensors(
+    session: aiohttp.ClientSession, host: str, port: int, token: str | None, *, secure: bool = False
+) -> list[Sensor]:
+    """`GET /sensors` (service 3.9+): every assigned sensor, each its own entry with its per-sensor settings."""
+    return await _request(session, "GET", host, port, token, "/sensors", secure=secure)
+
+
+async def async_get_sensor(
+    session: aiohttp.ClientSession, host: str, port: int, token: str | None, sensor_id: str, *, secure: bool = False
+) -> Sensor:
+    """`GET /sensors/{sensorId}` (service 3.9+); an unknown sensor is `NotFound`."""
+    return await _request(session, "GET", host, port, token, f"/sensors/{sensor_id}", secure=secure)
+
+
+async def async_list_supported_devices(
+    session: aiohttp.ClientSession, host: str, port: int, token: str | None, *, secure: bool = False
+) -> list[SupportedDevice]:
+    """`GET /sensors/supported-devices` (service 3.9+): the Ring-supported allowlist (Ring and First Alert).
+
+    Entries are keyed on `manufacturerId`, `productType` and `productId` (decimal). A `category` of `None` marks a
+    range extender, which only relays and never becomes a sensor entry."""
+    return await _request(session, "GET", host, port, token, "/sensors/supported-devices", secure=secure)
+
+
 async def async_update_sensor(
     session: aiohttp.ClientSession,
     host: str,
@@ -496,6 +545,9 @@ async def async_update_sensor(
     `placement`, `alertsOnly` and per-mode `armed` (`{"home": bool, "away": bool}`; either key alone is fine).
 
     `chirpTone` (`none`, `double_beep`, `guitar`, `wind_chimes`, `bing_bong`, `doorbell`) is intrusion-only.
+    From service 3.9 the update also takes `chimeEnabled`, `chimeSound` (same value as `chirpTone`), `sensorKind`
+    (`door`, `window`, `interior`), `entryway` (1-60 characters, `None` clears it), `isInterior` and `quickEntrySupported`;
+    the chime fields are intrusion-only like `chirpTone`.
     `400` (empty body, bad value, or `placement` / `chirpTone` on a life-safety sensor) -> `BadRequest`; `404` -> `NotFound`.
     The returned sensor carries the flat `armedHome` / `armedAway` fields."""
     return await _request(
