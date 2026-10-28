@@ -110,3 +110,11 @@ class TooManyRequests(ZwaveAlarmError):
     def __init__(self, message: str = "", retry_after: float | None = None) -> None:
         super().__init__(message)
         self.retry_after = retry_after
+
+
+class UnsupportedDevice(ZwaveAlarmError):
+    """The node is not a device Ring supports as a sensor (422 `unsupported_device`); see `async_list_supported_devices`."""
+
+
+class CategoryMismatch(ZwaveAlarmError):
+    """The chosen `category` does not match the device (422 `category_mismatch`)."""
